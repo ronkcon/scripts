@@ -1,0 +1,48 @@
+#!/bin/bash
+
+help() { 
+    if [ -z "${SCRIPT}" ];
+    then
+        SCRIPT=$(basename "$0")
+    fi
+    printf "\n"
+    printf "Connects to Beacon PSQL DBs\n"
+    printf "\n"
+    printf "Usage:\n"
+    printf "\t%s <environment>\n" "${SCRIPT}"
+    printf "\n"
+    printf "Options:\n"
+    printf "\n"
+    printf "<environment>:\n"
+    printf "\tThe name of the environment, must be one of: [dev].\n"
+    printf "\n"
+    printf "Examples:\n"
+    printf "\t# Connect to Dev\n"
+    printf "\t%s dev \n" "${SCRIPT}"
+    printf "\n"
+    exit 1
+}
+
+ENV_NAME=$1
+
+if [ -z ${ENV_NAME} ]; then
+    help
+fi
+
+case "${ENV_NAME}" in
+    dev)
+        DB_SERVER=dev-dev.cyb2q0w4e3cd.us-east-1.rds.amazonaws.com
+        DB_PORT=5432
+        DB_NAME=postgres
+        USERNAME=beacon
+        PASSWORD_FILE=/Users/ronk/.config/beacon/.dev.rds.pwd
+        ;;    
+    *)
+        echo "Unsupported env ${ENV_NAME}!"
+        exit 1
+        ;;
+esac
+
+echo "Connecting to ${ENV_NAME}"
+
+psqlenv --db-server ${DB_SERVER} --db-port ${DB_PORT} --db-name ${DB_NAME} --username ${USERNAME} --password-file ${PASSWORD_FILE}

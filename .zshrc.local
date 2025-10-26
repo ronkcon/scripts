@@ -1,1 +1,5 @@
 export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
+
+source /Users/ronk/code/work/beacon-security/beacon-utils/beacon_rc.sh
+
+export PATH="${PATH}:/Users/ronk/code/work/ronkcon/scripts"
