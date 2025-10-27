@@ -1,0 +1,16 @@
+#!/bin/bash
+
+PATTERN=$(echo $* | sed 's/ /\.\*/g')
+
+TEMP_LIST_FILE=$(mktemp)
+
+cat ~/.aws/config | egrep '^\[profile.*' | tr -d '[]' | sed 's|^profile ||' | grep -E -i "${PATTERN}" > ${TEMP_LIST_FILE}
+
+if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
+then
+	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}")
+else
+	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}" | fzf)
+fi
+
+export AWS_PROFILE
