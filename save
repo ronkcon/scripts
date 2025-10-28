@@ -1,0 +1,3 @@
+git add /Users/ronk/code/work/ronkcon/workpad
+git commit -m 'updates'
+git push --tags origin HEAD
