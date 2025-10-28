@@ -14,7 +14,7 @@ help() {
     printf "Options:\n"
     printf "\n"
     printf "<environment>:\n"
-    printf "\tThe name of the environment, must be one of: [localhost, dev, campari-dev].\n"
+    printf "\tThe name of the environment, must be one of: [localhost, dev, campari-dev, campari-prod].\n"
     printf "\n"
     printf "Examples:\n"
     printf "\t# Connect to Dev\n"
@@ -50,6 +50,13 @@ case "${ENV_NAME}" in
         DB_NAME=postgres
         USERNAME=beacon
         PASSWORD_FILE=/Users/ronk/.config/beacon/.campari.dev.rds.pwd
+        ;;            
+    campari-prod)
+        DB_SERVER=prod-campari-production.cl28i8uaqk9r.eu-west-1.rds.amazonaws.com
+        DB_PORT=5432
+        DB_NAME=postgres
+        USERNAME=beacon
+        PASSWORD_FILE=/Users/ronk/.config/beacon/.campari.prod.rds.pwd
         ;;            
     *)
         echo "Unsupported env ${ENV_NAME}!"
