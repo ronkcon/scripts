@@ -14,7 +14,7 @@ help() {
     printf "Options:\n"
     printf "\n"
     printf "<environment>:\n"
-    printf "\tThe name of the environment, must be one of: [dev, campari-dev].\n"
+    printf "\tThe name of the environment, must be one of: [localhost, dev, campari-dev].\n"
     printf "\n"
     printf "Examples:\n"
     printf "\t# Connect to Dev\n"
@@ -30,6 +30,13 @@ if [ -z ${ENV_NAME} ]; then
 fi
 
 case "${ENV_NAME}" in
+    localhost)
+        DB_SERVER=127.0.0.1
+        DB_PORT=5432
+        DB_NAME=mydatabase
+        USERNAME=user
+        PASSWORD_FILE=/Users/ronk/.config/beacon/.local.pg.pwd
+        ;;
     dev)
         DB_SERVER=dev-dev.cyb2q0w4e3cd.us-east-1.rds.amazonaws.com
         DB_PORT=5432
