@@ -1,3 +1,3 @@
-git add /Users/ronk/code/work/ronkcon/workpad
+git add /Users/ronk/code/work/ronkcon/scripts 
 git commit -m 'updates'
 git push --tags origin HEAD
