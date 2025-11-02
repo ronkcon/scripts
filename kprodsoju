@@ -1,3 +1,3 @@
 #!/bin/bash
 
-eks --workspace-name soju-prod --aws-region us-west-2 --aws-profile prod-soju --cluster-name production
+eks --workspace-name soju-prod --aws-region us-west-2 --aws-profile prod-soju --cluster-name production --project-dir /Users/ronk/code/work/beacon-security/

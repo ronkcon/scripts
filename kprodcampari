@@ -1,0 +1,1 @@
+eks --workspace-name campari-prod --aws-region eu-west-1 --aws-profile prod-campari --cluster-name production --project-dir /Users/ronk/code/work/beacon-security/
