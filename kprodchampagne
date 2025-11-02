@@ -1,0 +1,1 @@
+eks --workspace-name champagne-prod  --aws-region us-east-1 --aws-profile prod-champagne --cluster-name production --project-dir /Users/ronk/code/work/beacon-security/
