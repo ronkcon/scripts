@@ -1,0 +1,35 @@
+#!/bin/bash
+
+CONFIG_FILE="${KPROD_CONFIG:-"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/kprod.conf"}"
+CLUSTER_NAME="production"
+PROJECT_DIR="/Users/ronk/code/work/beacon-security/"
+SELECTION_PROMPT="Choose Production Cluster > "
+
+PATTERN=$(echo $* | sed 's/ /\.\*/g')
+
+TEMP_LIST_FILE=$(mktemp)
+
+cat ${CONFIG_FILE} | grep -v '^#' | cut -d',' -f1 | grep -E -i "${PATTERN}" > ${TEMP_LIST_FILE}
+
+if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "0" ]] 
+then
+  echo "No environments found to match the given filter: [$*]" >&2
+  exit 1
+elif [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
+then
+	ENV_NAME=$(cat "${TEMP_LIST_FILE}")
+else
+  set -euo pipefail
+	ENV_NAME=$(cat "${TEMP_LIST_FILE}" |  fzf --prompt="$SELECTION_PROMPT" --with-nth=1 --preview "cat ${CONFIG_FILE} | grep ^{}, | awk -F',' '{ printf \"AWS Profile : %s\nRegion      : %s\n\", \$3, \$4 }'")
+fi
+
+LINE=$(cat "${CONFIG_FILE}" | egrep "^${ENV_NAME},")
+
+IFS=',' read -r ENVIRONMENT WORKSPACE AWS_PROFILE AWS_REGION <<<"$LINE"
+
+eks \
+  --workspace-name "$WORKSPACE" \
+  --aws-region "$AWS_REGION" \
+  --aws-profile "$AWS_PROFILE" \
+  --cluster-name "$CLUSTER_NAME" \
+  --project-dir "$PROJECT_DIR"
