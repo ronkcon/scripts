@@ -14,7 +14,7 @@ help() {
     printf "Options:\n"
     printf "\n"
     printf "<environment>:\n"
-    printf "\tThe name of the environment, must be one of: [localhost, dev, campari-dev, campari-prod, soju-prod].\n"
+    printf "\tThe name of the environment.\n"
     printf "\n"
     printf "Examples:\n"
     printf "\t# Connect to Dev\n"
@@ -23,53 +23,31 @@ help() {
     exit 1
 }
 
-ENV_NAME=$1
+SCRIPT_DIR=$(dirname "$0")
+CONFIG_FILE="${SCRIPT_DIR}/bdb.conf"
+SELECTION_PROMPT="Choose DB > "
 
-if [ -z ${ENV_NAME} ]; then
-    help
+PATTERN=$(echo $* | sed 's/ /\.\*/g')
+
+TEMP_LIST_FILE=$(mktemp)
+
+cat ${CONFIG_FILE} | grep -v '^#' | cut -d',' -f1 | grep -E -i "${PATTERN}" > ${TEMP_LIST_FILE}
+
+if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "0" ]] 
+then
+  echo "No DB found to match the given filter: [$*]" >&2
+  exit 1
+elif [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
+then
+	ENV_NAME=$(cat "${TEMP_LIST_FILE}")
+else
+  set -euo pipefail
+	ENV_NAME=$(cat "${TEMP_LIST_FILE}" |  fzf --prompt="$SELECTION_PROMPT" --with-nth=1 --preview "cat ${CONFIG_FILE} | grep ^{}, | awk -F',' '{ printf \"DB Server : %s\nPort      : %s\nDB Name   : %s\n\", \$2, \$3, \$4 }'")
 fi
 
-case "${ENV_NAME}" in
-    localhost)
-        DB_SERVER=127.0.0.1
-        DB_PORT=5432
-        DB_NAME=mydatabase
-        USERNAME=user
-        PASSWORD_FILE=/Users/ronk/.config/beacon/.local.pg.pwd
-        ;;
-    dev)
-        DB_SERVER=dev-dev.cyb2q0w4e3cd.us-east-1.rds.amazonaws.com
-        DB_PORT=5432
-        DB_NAME=postgres
-        USERNAME=beacon
-        PASSWORD_FILE=/Users/ronk/.config/beacon/.dev.rds.pwd
-        ;;    
-    campari-dev)
-        DB_SERVER=prod-campari-dev.cl28i8uaqk9r.eu-west-1.rds.amazonaws.com
-        DB_PORT=5432
-        DB_NAME=postgres
-        USERNAME=beacon
-        PASSWORD_FILE=/Users/ronk/.config/beacon/.campari.dev.rds.pwd
-        ;;            
-    campari-prod)
-        DB_SERVER=prod-campari-production.cl28i8uaqk9r.eu-west-1.rds.amazonaws.com
-        DB_PORT=5432
-        DB_NAME=postgres
-        USERNAME=beacon
-        PASSWORD_FILE=/Users/ronk/.config/beacon/.campari.prod.rds.pwd
-        ;;            
-    soju-prod)
-        DB_SERVER=prod-soju-production.c32y0i8swmf9.us-west-2.rds.amazonaws.com
-        DB_PORT=5432
-        DB_NAME=postgres
-        USERNAME=beacon
-        PASSWORD_FILE=/Users/ronk/.config/beacon/.soju.prod.rds.pwd
-        ;;            
-    *)
-        echo "Unsupported env ${ENV_NAME}!"
-        exit 1
-        ;;
-esac
+LINE=$(cat "${CONFIG_FILE}" | egrep "^${ENV_NAME},")
+
+IFS=',' read -r ENVIRONMENT DB_SERVER DB_PORT DB_NAME USERNAME PASSWORD_FILE<<<"$LINE"
 
 echo "Connecting to ${ENV_NAME}"
 
