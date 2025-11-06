@@ -6,5 +6,9 @@ export PATH="${PATH}:/Users/ronk/code/work/ronkcon/scripts"
 
 export PATH="/Users/ronk/.local/bin:${PATH}"
 
+export PATH="/Users/ronk/code/work/beacon-security/core/flink/scripts/bin:${PATH}"
+
 alias pr='poetry run'
 alias ap='. awsprofile'
+
+export PATH="/opt/homebrew/opt/apache-flink@1/bin:$PATH"
