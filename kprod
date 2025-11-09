@@ -28,9 +28,14 @@ LINE=$(cat "${CONFIG_FILE}" | egrep "^${ENV_NAME},")
 
 IFS=',' read -r ENVIRONMENT WORKSPACE AWS_PROFILE AWS_REGION <<<"$LINE"
 
+${HOME}/.iterm2/it2profile -s "kubernetes-cluster"
+printf "\e]1337;SetBadgeFormat=%s\a" $(echo -n "${WORKSPACE}" | base64)
+
 eks \
   --workspace-name "$WORKSPACE" \
   --aws-region "$AWS_REGION" \
   --aws-profile "$AWS_PROFILE" \
   --cluster-name "$CLUSTER_NAME" \
   --project-dir "$PROJECT_DIR"
+
+printf "\e]1337;SetBadgeFormat=%s\a" $(echo -n "" | base64)

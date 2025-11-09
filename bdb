@@ -51,4 +51,11 @@ IFS=',' read -r ENVIRONMENT DB_SERVER DB_PORT DB_NAME USERNAME PASSWORD_FILE<<<"
 
 echo "Connecting to ${ENV_NAME}"
 
+if [[ "${ENV_NAME}" = *dev* ]]; then   
+  ${HOME}/.iterm2/it2profile -s "dev-db"
+else 
+  ${HOME}/.iterm2/it2profile -s "prod-db"
+fi
+printf "\e]1337;SetBadgeFormat=%s\a" $(echo -n "${ENV_NAME}" | base64)
 psqlenv --workspace-name "db--${ENV_NAME}" --db-server ${DB_SERVER} --db-port ${DB_PORT} --db-name ${DB_NAME} --username ${USERNAME} --password-file ${PASSWORD_FILE}
+printf "\e]1337;SetBadgeFormat=%s\a" $(echo -n "" | base64)
