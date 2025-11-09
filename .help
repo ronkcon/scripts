@@ -1,0 +1,3 @@
+#DOC# AWS;ap;Switch AWS Profile
+#DOC# Kubernetes;kprod;Connect to a Kubernetes Cluster
+#DOC# Postgres;bdb;Connect to Beacon Databases
