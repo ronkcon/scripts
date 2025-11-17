@@ -10,7 +10,7 @@ if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
 then
 	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}")
 else
-	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}" | fzf)
+	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}" | fzf --preview '_aws_profile_fzf_preview {}')
 fi
 
 export AWS_PROFILE

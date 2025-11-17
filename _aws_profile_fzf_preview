@@ -1,0 +1,5 @@
+#!/bin/bash
+
+PROFILE_NAME=$1
+awk -v profile="$PROFILE_NAME" '$0 == "[profile " profile "]" {found=1} found && /^\[/ && NR>1 && $0 != "[profile " profile "]" {exit} found && !/^[#;]/' ~/.aws/config
+
