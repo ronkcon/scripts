@@ -1,14 +1,15 @@
-export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
-
-source /Users/ronk/code/work/beacon-security/beacon-utils/beacon_rc.sh
-
-export PATH="${PATH}:/Users/ronk/code/work/ronkcon/scripts"
-
-export PATH="/Users/ronk/.local/bin:${PATH}"
-
-export PATH="/Users/ronk/code/work/beacon-security/core/flink/scripts/bin:${PATH}"
+source ${HOME}/code/work/beacon-security/beacon-utils/beacon_rc.sh
 
 alias pr='poetry run'
 alias ap='. awsprofile'
 
-export PATH="/opt/homebrew/opt/apache-flink@1/bin:$PATH"
+alias asso='aws sso login --profile'
+
+path=(
+  ${HOME}/.local/bin
+  ${HOME}/code/work/ronkcon/scripts
+  ${HOME}/code/work/beacon-security/core/flink/scripts/bin
+  /opt/homebrew/opt/apache-flink@1/bin
+  /opt/homebrew/opt/postgresql@18/bin
+  $path
+)
