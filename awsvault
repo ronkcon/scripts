@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PATTERN=$(echo $* | sed 's/ /\.\*/g')
+PATTERN=$(echo $* | sed 's/ /\\.\\*/g')
 
 TEMP_LIST_FILE=$(mktemp)
 
@@ -9,9 +9,14 @@ cat ~/.aws/config | egrep '^\[profile.*' | tr -d '[]' | sed 's|^profile ||' | gr
 
 if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
 then
-	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}")
+	SELECTED_PROFILE=$(cat "${TEMP_LIST_FILE}")
 else
-	AWS_PROFILE=$(cat "${TEMP_LIST_FILE}" | fzf --preview '_aws_profile_fzf_preview {}')
+	SELECTED_PROFILE=$(cat "${TEMP_LIST_FILE}" | fzf --preview '_aws_profile_fzf_preview {}')
 fi
 
-export AWS_PROFILE
+rm -f "${TEMP_LIST_FILE}"
+
+if [[ -n "${SELECTED_PROFILE}" ]]
+then
+	eval "$(aws-vault export "${SELECTED_PROFILE}" --format export-env)"
+fi

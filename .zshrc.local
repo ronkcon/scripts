@@ -2,6 +2,7 @@ source ${HOME}/code/work/beacon-security/beacon-utils/beacon_rc.sh
 
 alias pr='poetry run'
 alias ap='. awsprofile'
+alias av='. awsvault'
 
 alias asso='aws sso login --profile'
 
