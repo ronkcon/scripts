@@ -1,2 +1,7 @@
 #DOC# AWS;ap;Switch AWS Profile
 #DOC# Kubernetes;kprod;Connect to a Kubernetes Cluster
+#DOC# Flink;getJobId;Get the Job ID of the first job running on the local job manager
+#DOC# Flink;getJobsState;Get the state of all the jobs running on the local job manager
+#DOC# Flink;stopJobWithDrain;Stop the first job running on the local job manager - with the `--drain` flag
+
+

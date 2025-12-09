@@ -1,0 +1,2 @@
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$SCRIPT_DIR/getJobsState" | jq -r '.jobs[0].id'

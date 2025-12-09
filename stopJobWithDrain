@@ -1,0 +1,2 @@
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+flink stop -m localhost:8081 --savepoint s3://dev-dev-us-east-1-flink-artifacts/savepoints/ron-test-pipeline/ --drain $("$SCRIPT_DIR/getJobId")
