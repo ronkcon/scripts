@@ -1,32 +1,31 @@
 #!/bin/bash
 
-SCRIPT_DIR=$(dirname "$0")
-CONFIG_FILE="${SCRIPT_DIR}/kdev.conf"
 CLUSTER_NAME="dev"
 PROJECT_DIR="/Users/ronk/code/work/beacon-security/"
 SELECTION_PROMPT="Choose DEV Cluster > "
 
-PATTERN=$(echo $* | sed 's/ /\.\*/g')
+PATTERN=$(echo $* | sed 's/ /.*/g')
 
 TEMP_LIST_FILE=$(mktemp)
 
-cat ${CONFIG_FILE} | grep -v '^#' | cut -d',' -f1 | grep -E -i "${PATTERN}" > ${TEMP_LIST_FILE}
+kubectl config get-contexts -o name | grep dev | grep -E -i "${PATTERN}" > ${TEMP_LIST_FILE}
 
-if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "0" ]] 
+if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "0" ]]
 then
   echo "No environments found to match the given filter: [$*]" >&2
   exit 1
 elif [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
 then
-	ENV_NAME=$(cat "${TEMP_LIST_FILE}")
+	CONTEXT_NAME=$(cat "${TEMP_LIST_FILE}")
 else
   set -euo pipefail
-	ENV_NAME=$(cat "${TEMP_LIST_FILE}" |  fzf --prompt="$SELECTION_PROMPT" --with-nth=1 --preview "cat ${CONFIG_FILE} | grep ^{}, | awk -F',' '{ printf \"AWS Profile : %s\nRegion      : %s\n\", \$3, \$4 }'")
+	CONTEXT_NAME=$(cat "${TEMP_LIST_FILE}" | fzf --prompt="$SELECTION_PROMPT")
 fi
 
-LINE=$(cat "${CONFIG_FILE}" | egrep "^${ENV_NAME},")
-
-IFS=',' read -r ENVIRONMENT WORKSPACE AWS_PROFILE AWS_REGION <<<"$LINE"
+CLUSTER_ARN=$(kubectl config get-contexts "${CONTEXT_NAME}" --no-headers | awk '{print $3}')
+AWS_REGION=$(echo "${CLUSTER_ARN}" | awk -F: '{print $4}')
+AWS_PROFILE=$(cat ~/.kube/config | yq ".users[] | select(.name == \"${CLUSTER_ARN}\") | .user.exec.env[] | select(.name == \"AWS_PROFILE\") | .value")
+WORKSPACE="${CONTEXT_NAME}"
 
 ${HOME}/.iterm2/it2profile -s "kubernetes-dev-cluster"
 printf "\e]1337;SetBadgeFormat=%s\a" $(echo -n "${WORKSPACE}" | base64)
