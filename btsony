@@ -1,0 +1,4 @@
+blueutil --connect "Ron's Sony Headsets"
+if [[ $? -ne 0 ]]; then
+  blueutil --connect "Ron's Sony Headsets"
+fi
