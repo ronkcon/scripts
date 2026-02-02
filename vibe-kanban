@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# vibe-kanban management script
+# Usage: vibe-kanban start|stop
+
+PIDFILE="${HOME}/.vibe-kanban.pid"
+LOGFILE="${HOME}/.vibe-kanban.log"
+PORT="${VIBE_KANBAN_PORT:-44744}"
+
+is_running() {
+    if [[ -f "$PIDFILE" ]]; then
+        local pid
+        pid=$(cat "$PIDFILE")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            return 0
+        else
+            # Stale pidfile
+            rm -f "$PIDFILE"
+        fi
+    fi
+    return 1
+}
+
+start() {
+    if is_running; then
+        local pid
+        pid=$(cat "$PIDFILE")
+        echo "vibe-kanban is already running (PID: $pid)"
+        echo "Log: $LOGFILE"
+        return 1
+    fi
+
+    echo "Starting vibe-kanban on port $PORT..."
+    PORT="$PORT" nohup npx vibe-kanban > "$LOGFILE" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PIDFILE"
+
+    # Wait briefly to check if it started successfully
+    sleep 2
+    if is_running; then
+        echo "vibe-kanban started (PID: $pid)"
+        echo "Log: $LOGFILE"
+        echo "URL: http://localhost:$PORT"
+    else
+        echo "Failed to start vibe-kanban. Check log: $LOGFILE"
+        rm -f "$PIDFILE"
+        return 1
+    fi
+}
+
+stop() {
+    if ! is_running; then
+        echo "vibe-kanban is NOT running"
+        return 1
+    fi
+
+    local pid
+    pid=$(cat "$PIDFILE")
+    echo "Stopping vibe-kanban (PID: $pid)..."
+    kill "$pid" 2>/dev/null
+
+    # Wait for process to terminate
+    local count=0
+    while ps -p "$pid" > /dev/null 2>&1 && [[ $count -lt 10 ]]; do
+        sleep 0.5
+        ((count++))
+    done
+
+    if ps -p "$pid" > /dev/null 2>&1; then
+        echo "Process didn't terminate gracefully, forcing..."
+        kill -9 "$pid" 2>/dev/null
+    fi
+
+    rm -f "$PIDFILE"
+    echo "vibe-kanban stopped"
+}
+
+status() {
+    if is_running; then
+        local pid
+        pid=$(cat "$PIDFILE")
+        echo "vibe-kanban is running (PID: $pid)"
+        echo "Log: $LOGFILE"
+        echo "URL: http://localhost:$PORT"
+    else
+        echo "vibe-kanban is NOT running"
+    fi
+}
+
+case "${1:-}" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Usage: vibe-kanban {start|stop|status}"
+        exit 1
+        ;;
+esac
