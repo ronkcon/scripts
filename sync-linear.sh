@@ -26,6 +26,7 @@ else
     echo "  LINEAR_API_KEY=..."
     echo "  LINEAR_EMAIL=..."
     echo "  VIBE_KANBAN_PORT=..."
+    echo "  VIBE_PROJECT_ID=...    # UUID of the vibe-kanban remote project"
     echo "  VIBE_REPO_ID=...       # UUID of the repo in vibe-kanban (from /api/repos)"
     echo "  VIBE_TARGET_BRANCH=... # Optional: target branch (default: main)"
     echo "  VIBE_EXECUTOR=...      # Optional: executor (default: CLAUDE_CODE)"
@@ -54,6 +55,12 @@ validate_env() {
         missing=1
     fi
 
+    if [[ -z "$VIBE_PROJECT_ID" ]]; then
+        echo -e "${RED}Error: VIBE_PROJECT_ID is not set${NC}"
+        echo "  Set the vibe-kanban remote project UUID"
+        missing=1
+    fi
+
     if [[ -z "$VIBE_REPO_ID" ]]; then
         echo -e "${RED}Error: VIBE_REPO_ID is not set${NC}"
         echo "  Set the vibe-kanban repo UUID (run: curl http://127.0.0.1:\$VIBE_KANBAN_PORT/api/repos)"
@@ -71,11 +78,24 @@ validate_env
 
 # Configuration
 VIBE_KANBAN_URL="http://127.0.0.1:${VIBE_KANBAN_PORT}"
+VIBE_REMOTE_URL="https://api.vibekanban.com"
 LINEAR_API_URL="https://api.linear.app/graphql"
 VIBE_TARGET_BRANCH="${VIBE_TARGET_BRANCH:-main}"
 VIBE_EXECUTOR="${VIBE_EXECUTOR:-CLAUDE_CODE}"
 
 echo -e "${BLUE}Syncing Linear tasks for ${LINEAR_EMAIL}...${NC}"
+
+# Fetch a fresh auth token from the local vibe-kanban server
+fetch_vibe_token() {
+    local token
+    token=$(curl -s "${VIBE_KANBAN_URL}/api/auth/token" | jq -r '.data.access_token // empty')
+    if [[ -z "$token" ]]; then
+        echo -e "${RED}Error: Could not fetch auth token from vibe-kanban.${NC}" >&2
+        echo "  Make sure vibe-kanban is running and you are logged in." >&2
+        exit 1
+    fi
+    echo "$token"
+}
 
 # Fetch issues from Linear assigned to the user
 fetch_linear_issues() {
@@ -101,15 +121,53 @@ fetch_linear_issues() {
         --data-binary "$(jq -n --arg query "$query" --arg email "$LINEAR_EMAIL" '{query: $query, variables: {filter: {assignee: {email: {eq: $email}}}}}')"
 }
 
-# Fetch existing workspaces from vibe-kanban
-fetch_kanban_workspaces() {
-    curl -s "${VIBE_KANBAN_URL}/api/task-attempts"
+# Fetch project statuses from vibe-kanban remote
+fetch_project_statuses() {
+    local token="$1"
+    curl -s "${VIBE_REMOTE_URL}/v1/fallback/project_statuses?project_id=${VIBE_PROJECT_ID}" \
+        -H "Authorization: Bearer $token" \
+        -H "X-Client-Version: 0.1.18" \
+        -H "X-Client-Type: frontend"
 }
 
-# Create a workspace in vibe-kanban for a Linear issue
-create_kanban_workspace() {
+# Fetch existing issues from vibe-kanban project
+fetch_project_issues() {
+    local token="$1"
+    local offset="${2:-0}"
+    curl -s "${VIBE_REMOTE_URL}/v1/fallback/issues?project_id=${VIBE_PROJECT_ID}&limit=200&offset=${offset}" \
+        -H "Authorization: Bearer $token" \
+        -H "X-Client-Version: 0.1.18" \
+        -H "X-Client-Type: frontend"
+}
+
+# Create a vibe-kanban issue in the project
+create_project_issue() {
+    local token="$1"
+    local issue_id="$2"
+    local title="$3"
+    local description="$4"
+    local status_id="$5"
+
+    curl -s -X POST "${VIBE_REMOTE_URL}/v1/issues" \
+        -H "Authorization: Bearer $token" \
+        -H "X-Client-Version: 0.1.18" \
+        -H "X-Client-Type: frontend" \
+        -H "Content-Type: application/json" \
+        --data-binary "$(jq -n \
+            --arg id "$issue_id" \
+            --arg project_id "$VIBE_PROJECT_ID" \
+            --arg title "$title" \
+            --arg desc "$description" \
+            --arg status_id "$status_id" \
+            '{id: $id, project_id: $project_id, title: $title, description: $desc,
+              status_id: $status_id, sort_order: 0, extension_metadata: {}}')"
+}
+
+# Create a workspace in vibe-kanban linked to a project issue
+create_linked_workspace() {
     local name="$1"
     local prompt="$2"
+    local issue_id="$3"
 
     curl -s -X POST "${VIBE_KANBAN_URL}/api/task-attempts/create-and-start" \
         -H "Content-Type: application/json" \
@@ -119,22 +177,68 @@ create_kanban_workspace() {
             --arg repo_id "$VIBE_REPO_ID" \
             --arg branch "$VIBE_TARGET_BRANCH" \
             --arg executor "$VIBE_EXECUTOR" \
+            --arg issue_id "$issue_id" \
+            --arg project_id "$VIBE_PROJECT_ID" \
             '{
                 name: $name,
                 prompt: $prompt,
                 executor_config: {executor: $executor, variant: "DEFAULT"},
                 repos: [{repo_id: $repo_id, target_branch: $branch}],
-                linked_issue: null
+                linked_issue: {remote_project_id: $project_id, issue_id: $issue_id}
             }')"
+}
+
+# Map Linear status type/name to vibe-kanban status name
+map_status_name() {
+    local status_name="$1"
+    local status_type="$2"
+
+    case "$status_type" in
+        "started")    echo "In progress" ;;
+        "completed")  echo "Done" ;;
+        "canceled"|"cancelled") echo "Cancelled" ;;
+        *)
+            case "$status_name" in
+                "In Progress")  echo "In progress" ;;
+                "In Review")    echo "In review" ;;
+                "Done")         echo "Done" ;;
+                "Duplicate"|"Canceled"|"Cancelled") echo "Cancelled" ;;
+                *)              echo "To do" ;;
+            esac
+            ;;
+    esac
+}
+
+# Generate a UUID (compatible with both Linux and macOS)
+new_uuid() {
+    python3 -c "import uuid; print(str(uuid.uuid4()))"
 }
 
 # Main sync logic
 main() {
+    echo -e "${YELLOW}Fetching auth token from vibe-kanban...${NC}"
+    local token
+    token=$(fetch_vibe_token)
+
+    echo -e "${YELLOW}Fetching project statuses...${NC}"
+    local statuses_json
+    statuses_json=$(fetch_project_statuses "$token")
+    if ! echo "$statuses_json" | jq -e '.project_statuses' > /dev/null 2>&1; then
+        echo -e "${RED}Error fetching project statuses:${NC}"
+        echo "$statuses_json"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Fetching existing project issues...${NC}"
+    local issues_json
+    issues_json=$(fetch_project_issues "$token")
+    local existing_issues
+    existing_issues=$(echo "$issues_json" | jq -r '.issues // []')
+
     echo -e "${YELLOW}Fetching Linear issues...${NC}"
     local linear_response
     linear_response=$(fetch_linear_issues)
 
-    # Check for errors
     if echo "$linear_response" | jq -e '.errors' > /dev/null 2>&1; then
         echo -e "${RED}Error fetching Linear issues:${NC}"
         echo "$linear_response" | jq '.errors'
@@ -148,16 +252,9 @@ main() {
 
     echo -e "${GREEN}Found ${issue_count} Linear issues${NC}"
 
-    echo -e "${YELLOW}Fetching vibe-kanban workspaces...${NC}"
-    local kanban_response
-    kanban_response=$(fetch_kanban_workspaces)
-    local kanban_workspaces
-    kanban_workspaces=$(echo "$kanban_response" | jq -r '.data // []')
-
     local created=0
     local skipped=0
 
-    # Process each Linear issue
     local issue_ids
     issue_ids=$(echo "$issues" | jq -r '.[].identifier')
 
@@ -172,28 +269,62 @@ main() {
         url=$(echo "$issue" | jq -r '.url')
         local status_name
         status_name=$(echo "$issue" | jq -r '.state.name')
+        local status_type
+        status_type=$(echo "$issue" | jq -r '.state.type')
 
-        # Build workspace name and prompt
-        local workspace_name="[${identifier}] ${title}"
-        local workspace_prompt
-        workspace_prompt="$(printf '%s\n\nStatus: %s\nLinear: %s\n\n%s' "$title" "$status_name" "$url" "$description")"
+        # Map to vibe-kanban status name, then look up its ID
+        local vibe_status_name
+        vibe_status_name=$(map_status_name "$status_name" "$status_type")
+        local status_id
+        status_id=$(echo "$statuses_json" | jq -r --arg name "$vibe_status_name" \
+            '.project_statuses[] | select(.name == $name) | .id')
+        # Fallback to "To do" if status not found
+        if [[ -z "$status_id" ]]; then
+            status_id=$(echo "$statuses_json" | jq -r \
+                '.project_statuses[] | select(.name == "To do") | .id')
+        fi
 
-        # Check if workspace already exists (match by [IDENTIFIER] prefix in name)
+        # Build issue title and description
+        local issue_title="[${identifier}] ${title}"
+        local issue_desc
+        issue_desc="$(printf '%s\n\nLinear: %s' "$description" "$url")"
+
+        # Check if issue already exists in the project
         local existing
-        existing=$(echo "$kanban_workspaces" | jq -r --arg id "[$identifier]" '.[] | select(.name | startswith($id))')
+        existing=$(echo "$existing_issues" | jq -r --arg id "[$identifier]" \
+            '.[] | select(.title | startswith($id))')
 
         if [[ -n "$existing" ]]; then
-            echo -e "  ${YELLOW}Skipping${NC} ${identifier}: workspace already exists"
+            echo -e "  ${YELLOW}Skipping${NC} ${identifier}: already in project"
             ((skipped++)) || true
         else
             echo -e "  ${GREEN}Creating${NC} ${identifier}: ${title}"
-            local result
-            result=$(create_kanban_workspace "$workspace_name" "$workspace_prompt")
-            if echo "$result" | jq -e '.success == true' > /dev/null 2>&1; then
+
+            # Create the vibe-kanban project issue
+            local new_issue_id
+            new_issue_id=$(new_uuid)
+            local create_result
+            create_result=$(create_project_issue "$token" "$new_issue_id" "$issue_title" "$issue_desc" "$status_id")
+
+            if ! echo "$create_result" | jq -e '.data.id' > /dev/null 2>&1; then
+                echo -e "  ${RED}Failed${NC} to create issue for ${identifier}: $create_result"
+                continue
+            fi
+
+            local vibe_issue_id
+            vibe_issue_id=$(echo "$create_result" | jq -r '.data.id')
+
+            # Create a workspace linked to the issue
+            local workspace_prompt
+            workspace_prompt="$(printf '%s\n\nStatus: %s\nLinear: %s\n\n%s' "$title" "$status_name" "$url" "$description")"
+            local ws_result
+            ws_result=$(create_linked_workspace "$issue_title" "$workspace_prompt" "$vibe_issue_id")
+
+            if echo "$ws_result" | jq -e '.success == true' > /dev/null 2>&1; then
                 ((created++)) || true
             else
                 echo -e "  ${RED}Failed${NC} to create workspace for ${identifier}:"
-                echo "$result" | jq -r '.message // .error_data // .'
+                echo "$ws_result" | jq -r '.message // .error_data // .'
             fi
         fi
     done
