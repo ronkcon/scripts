@@ -33,3 +33,6 @@ if [[ -d ${RONKCON_CODE_ROOT:-} ]]; then
   done
 fi
 
+cdoutpost() {
+   cd /Users/ronk/code/work/beacon-security/core/supervisor/outpost_manager_cli
+}
