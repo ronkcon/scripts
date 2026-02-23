@@ -1,6 +1,14 @@
 #!/bin/bash
 #
-# Find workspaces that are not linked to any issue (task_id is null).
+# Find local workspaces that are not linked to any issue across all projects.
+#
+# Strategy:
+#   1. Fetch all local workspace IDs from the local API
+#   2. Fetch all organizations, then all projects per org
+#   3. For each project, fetch remote project_workspaces and collect
+#      local_workspace_ids that have an issue_id (i.e. are linked)
+#   4. Any local workspace not in the linked set is unlinked
+#
 # Usage: ./find-unlinked-workspaces.sh [--delete]
 #
 # Options:
@@ -49,17 +57,79 @@ fi
 
 VIBE_KANBAN_PORT="${VIBE_KANBAN_PORT:-44744}"
 VIBE_KANBAN_URL="http://127.0.0.1:${VIBE_KANBAN_PORT}"
+VIBE_REMOTE_URL="https://api.vibekanban.com"
 
+# Fetch a fresh auth token
+vibe_token() {
+    local token
+    token=$(curl -s "${VIBE_KANBAN_URL}/api/auth/token" | jq -r '.data.access_token // empty')
+    if [[ -z "$token" ]]; then
+        echo -e "${RED}Error: Could not fetch auth token from vibe-kanban.${NC}" >&2
+        echo "  Make sure vibe-kanban is running and you are logged in." >&2
+        exit 1
+    fi
+    echo "$token"
+}
+
+remote_api() {
+    local method="$1"
+    local path="$2"
+    shift 2
+    curl -s -X "$method" "${VIBE_REMOTE_URL}${path}" \
+        -H "Authorization: Bearer $(vibe_token)" \
+        -H "X-Client-Version: 0.1.18" \
+        -H "X-Client-Type: frontend" \
+        "$@"
+}
+
+# Step 1: all local workspaces
 echo -e "${BLUE}Fetching all local workspaces...${NC}"
-workspaces_json=$(curl -s "${VIBE_KANBAN_URL}/api/task-attempts")
-if ! echo "$workspaces_json" | jq -e '.success == true' > /dev/null 2>&1; then
-    echo -e "${RED}Error fetching workspaces:${NC}"
-    echo "$workspaces_json"
+local_json=$(curl -s "${VIBE_KANBAN_URL}/api/task-attempts")
+if ! echo "$local_json" | jq -e '.success == true' > /dev/null 2>&1; then
+    echo -e "${RED}Error fetching local workspaces:${NC}"
+    echo "$local_json"
     exit 1
 fi
+local_count=$(echo "$local_json" | jq '.data | length')
+echo -e "  Found ${local_count} local workspace(s)"
 
-# Workspaces with task_id == null are not linked to any issue
-unlinked_json=$(echo "$workspaces_json" | jq '[.data[] | select(.task_id == null)]')
+# Step 2: get all organizations from local API
+echo -e "${BLUE}Fetching organizations...${NC}"
+orgs_json=$(curl -s "${VIBE_KANBAN_URL}/api/organizations")
+if ! echo "$orgs_json" | jq -e '.success == true' > /dev/null 2>&1; then
+    echo -e "${RED}Error fetching organizations:${NC}"
+    echo "$orgs_json"
+    exit 1
+fi
+org_ids=$(echo "$orgs_json" | jq -r '.data.organizations[].id')
+
+# Step 3: for each org, fetch projects; for each project, collect linked local_workspace_ids
+echo -e "${BLUE}Fetching projects and their remote workspace links...${NC}"
+linked_ids=""
+
+for org_id in $org_ids; do
+    projects_json=$(remote_api GET "/v1/fallback/projects?organization_id=${org_id}")
+    if ! echo "$projects_json" | jq -e '.projects' > /dev/null 2>&1; then
+        echo -e "${YELLOW}  Warning: could not fetch projects for org ${org_id}${NC}"
+        continue
+    fi
+
+    while IFS=$'\t' read -r project_id project_name; do
+        echo -e "  Checking project: ${project_name} (${project_id})"
+        pw_json=$(remote_api GET "/v1/fallback/project_workspaces?project_id=${project_id}")
+        if echo "$pw_json" | jq -e '.workspaces' > /dev/null 2>&1; then
+            ids=$(echo "$pw_json" | jq -r '.workspaces[] | select(.issue_id != null and .issue_id != "") | .local_workspace_id')
+            linked_ids="${linked_ids}${ids}"$'\n'
+        fi
+    done < <(echo "$projects_json" | jq -r '.projects[] | [.id, .name] | @tsv')
+done
+
+# Step 4: find local workspaces not in the linked set
+echo ""
+linked_array=$(echo "$linked_ids" | grep -v '^$' | jq -R . | jq -s .)
+unlinked_json=$(echo "$local_json" | jq --argjson linked "$linked_array" \
+    '[.data[] | select(.id as $id | $linked | index($id) == null)]')
+
 unlinked_count=$(echo "$unlinked_json" | jq 'length')
 
 if [[ "$unlinked_count" -eq 0 ]]; then
