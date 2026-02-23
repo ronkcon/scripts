@@ -26,7 +26,9 @@ else
     echo "  LINEAR_API_KEY=..."
     echo "  LINEAR_EMAIL=..."
     echo "  VIBE_KANBAN_PORT=..."
-    echo "  VIBE_PROJECT_ID=..."
+    echo "  VIBE_REPO_ID=...       # UUID of the repo in vibe-kanban (from /api/repos)"
+    echo "  VIBE_TARGET_BRANCH=... # Optional: target branch (default: main)"
+    echo "  VIBE_EXECUTOR=...      # Optional: executor (default: CLAUDE_CODE)"
     exit 1
 fi
 
@@ -52,9 +54,9 @@ validate_env() {
         missing=1
     fi
 
-    if [[ -z "$VIBE_PROJECT_ID" ]]; then
-        echo -e "${RED}Error: VIBE_PROJECT_ID is not set${NC}"
-        echo "  Set your vibe-kanban project ID"
+    if [[ -z "$VIBE_REPO_ID" ]]; then
+        echo -e "${RED}Error: VIBE_REPO_ID is not set${NC}"
+        echo "  Set the vibe-kanban repo UUID (run: curl http://127.0.0.1:\$VIBE_KANBAN_PORT/api/repos)"
         missing=1
     fi
 
@@ -70,6 +72,8 @@ validate_env
 # Configuration
 VIBE_KANBAN_URL="http://127.0.0.1:${VIBE_KANBAN_PORT}"
 LINEAR_API_URL="https://api.linear.app/graphql"
+VIBE_TARGET_BRANCH="${VIBE_TARGET_BRANCH:-main}"
+VIBE_EXECUTOR="${VIBE_EXECUTOR:-CLAUDE_CODE}"
 
 echo -e "${BLUE}Syncing Linear tasks for ${LINEAR_EMAIL}...${NC}"
 
@@ -94,69 +98,34 @@ fetch_linear_issues() {
     curl -s -X POST "$LINEAR_API_URL" \
         -H "Content-Type: application/json" \
         -H "Authorization: $LINEAR_API_KEY" \
-        -d "$(jq -n --arg query "$query" --arg email "$LINEAR_EMAIL" '{query: $query, variables: {filter: {assignee: {email: {eq: $email}}}}}')"
+        --data-binary "$(jq -n --arg query "$query" --arg email "$LINEAR_EMAIL" '{query: $query, variables: {filter: {assignee: {email: {eq: $email}}}}}')"
 }
 
-# Fetch existing tasks from vibe-kanban
-fetch_kanban_tasks() {
-    curl -s "${VIBE_KANBAN_URL}/api/tasks?project_id=${VIBE_PROJECT_ID}&limit=200"
+# Fetch existing workspaces from vibe-kanban
+fetch_kanban_workspaces() {
+    curl -s "${VIBE_KANBAN_URL}/api/task-attempts"
 }
 
-# Create a task in vibe-kanban
-create_kanban_task() {
-    local title="$1"
-    local description="$2"
+# Create a workspace in vibe-kanban for a Linear issue
+create_kanban_workspace() {
+    local name="$1"
+    local prompt="$2"
 
-    curl -s -X POST "${VIBE_KANBAN_URL}/api/tasks" \
+    curl -s -X POST "${VIBE_KANBAN_URL}/api/task-attempts/create-and-start" \
         -H "Content-Type: application/json" \
-        -d "$(jq -n --arg title "$title" --arg desc "$description" --arg pid "$VIBE_PROJECT_ID" '{title: $title, description: $desc, project_id: $pid}')"
-}
-
-# Update a task in vibe-kanban
-update_kanban_task() {
-    local task_id="$1"
-    local status="$2"
-
-    curl -s -X PUT "${VIBE_KANBAN_URL}/api/tasks/${task_id}" \
-        -H "Content-Type: application/json" \
-        -d "$(jq -n --arg status "$status" '{status: $status}')"
-}
-
-# Map Linear status to kanban status
-map_status() {
-    local linear_status="$1"
-    local status_type="$2"
-
-    case "$status_type" in
-        "started")
-            echo "inprogress"
-            ;;
-        "completed")
-            echo "done"
-            ;;
-        "canceled"|"cancelled")
-            echo "cancelled"
-            ;;
-        *)
-            case "$linear_status" in
-                "In Progress")
-                    echo "inprogress"
-                    ;;
-                "In Review")
-                    echo "inreview"
-                    ;;
-                "Done")
-                    echo "done"
-                    ;;
-                "Duplicate"|"Canceled"|"Cancelled")
-                    echo "cancelled"
-                    ;;
-                *)
-                    echo "todo"
-                    ;;
-            esac
-            ;;
-    esac
+        --data-binary "$(jq -n \
+            --arg name "$name" \
+            --arg prompt "$prompt" \
+            --arg repo_id "$VIBE_REPO_ID" \
+            --arg branch "$VIBE_TARGET_BRANCH" \
+            --arg executor "$VIBE_EXECUTOR" \
+            '{
+                name: $name,
+                prompt: $prompt,
+                executor_config: {executor: $executor, variant: "DEFAULT"},
+                repos: [{repo_id: $repo_id, target_branch: $branch}],
+                linked_issue: null
+            }')"
 }
 
 # Main sync logic
@@ -179,17 +148,16 @@ main() {
 
     echo -e "${GREEN}Found ${issue_count} Linear issues${NC}"
 
-    echo -e "${YELLOW}Fetching kanban tasks...${NC}"
+    echo -e "${YELLOW}Fetching vibe-kanban workspaces...${NC}"
     local kanban_response
-    kanban_response=$(fetch_kanban_tasks)
-    local kanban_tasks
-    kanban_tasks=$(echo "$kanban_response" | jq -r '.data // []')
+    kanban_response=$(fetch_kanban_workspaces)
+    local kanban_workspaces
+    kanban_workspaces=$(echo "$kanban_response" | jq -r '.data // []')
 
     local created=0
-    local updated=0
     local skipped=0
 
-    # Process each Linear issue using a for loop to avoid subshell
+    # Process each Linear issue
     local issue_ids
     issue_ids=$(echo "$issues" | jq -r '.[].identifier')
 
@@ -204,56 +172,35 @@ main() {
         url=$(echo "$issue" | jq -r '.url')
         local status_name
         status_name=$(echo "$issue" | jq -r '.state.name')
-        local status_type
-        status_type=$(echo "$issue" | jq -r '.state.type')
-        local kanban_status
-        kanban_status=$(map_status "$status_name" "$status_type")
 
-        # Build task title and description
-        local task_title="[${identifier}] ${title}"
-        local task_desc="${description}"
-        task_desc="${task_desc}\n\nLinear: ${url}"
+        # Build workspace name and prompt
+        local workspace_name="[${identifier}] ${title}"
+        local workspace_prompt
+        workspace_prompt="$(printf '%s\n\nStatus: %s\nLinear: %s\n\n%s' "$title" "$status_name" "$url" "$description")"
 
-        # Check if task already exists in kanban
-        local existing_task
-        existing_task=$(echo "$kanban_tasks" | jq -r --arg id "[$identifier]" '.[] | select(.title | startswith($id))')
+        # Check if workspace already exists (match by [IDENTIFIER] prefix in name)
+        local existing
+        existing=$(echo "$kanban_workspaces" | jq -r --arg id "[$identifier]" '.[] | select(.name | startswith($id))')
 
-        if [[ -n "$existing_task" ]]; then
-            local existing_id
-            existing_id=$(echo "$existing_task" | jq -r '.id')
-            local existing_status
-            existing_status=$(echo "$existing_task" | jq -r '.status')
-
-            if [[ "$existing_status" != "$kanban_status" ]]; then
-                echo -e "  ${YELLOW}Updating${NC} ${identifier}: ${existing_status} -> ${kanban_status}"
-                update_kanban_task "$existing_id" "$kanban_status" > /dev/null
-                ((updated++)) || true
-            else
-                ((skipped++)) || true
-            fi
+        if [[ -n "$existing" ]]; then
+            echo -e "  ${YELLOW}Skipping${NC} ${identifier}: workspace already exists"
+            ((skipped++)) || true
         else
             echo -e "  ${GREEN}Creating${NC} ${identifier}: ${title}"
-            create_kanban_task "$task_title" "$(echo -e "$task_desc")" > /dev/null
-
-            # Get the newly created task and update its status if not todo
-            if [[ "$kanban_status" != "todo" ]]; then
-                sleep 0.2  # Brief delay to ensure task is created
-                local new_tasks
-                new_tasks=$(fetch_kanban_tasks)
-                local new_task_id
-                new_task_id=$(echo "$new_tasks" | jq -r --arg id "[$identifier]" '.data[] | select(.title | startswith($id)) | .id')
-                if [[ -n "$new_task_id" ]]; then
-                    update_kanban_task "$new_task_id" "$kanban_status" > /dev/null
-                fi
+            local result
+            result=$(create_kanban_workspace "$workspace_name" "$workspace_prompt")
+            if echo "$result" | jq -e '.success == true' > /dev/null 2>&1; then
+                ((created++)) || true
+            else
+                echo -e "  ${RED}Failed${NC} to create workspace for ${identifier}:"
+                echo "$result" | jq -r '.message // .error_data // .'
             fi
-            ((created++)) || true
         fi
     done
 
     echo ""
     echo -e "${GREEN}Sync complete!${NC}"
     echo -e "  Created: ${created}"
-    echo -e "  Updated: ${updated}"
     echo -e "  Skipped: ${skipped}"
 }
 
