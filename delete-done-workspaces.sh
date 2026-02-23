@@ -1,10 +1,14 @@
 #!/bin/bash
 #
 # Delete workspaces for Done/Cancelled issues in a vibe-kanban project
-# Usage: ./delete-done-workspaces.sh <project_id>
+# Usage: ./delete-done-workspaces.sh [--simulation] [--include-backlog] <project_id>
 #
 # For each issue in Done or Cancelled status, finds its linked workspace,
 # unlinks it from the issue, and deletes it.
+#
+# Options:
+#   --simulation      Dry run: show what would be deleted without doing it
+#   --include-backlog Also delete workspaces for Backlog issues
 #
 
 set -e
@@ -17,14 +21,44 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-PROJECT_ID="${1:-}"
+SIMULATION=false
+INCLUDE_BACKLOG=false
+PROJECT_ID=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --simulation)
+            SIMULATION=true
+            shift
+            ;;
+        --include-backlog)
+            INCLUDE_BACKLOG=true
+            shift
+            ;;
+        -*)
+            echo -e "${RED}Error: unknown option $1${NC}"
+            echo "Usage: $0 [--simulation] [--include-backlog] <project_id>"
+            exit 1
+            ;;
+        *)
+            PROJECT_ID="$1"
+            shift
+            ;;
+    esac
+done
 
 if [[ -z "$PROJECT_ID" ]]; then
     echo -e "${RED}Error: project_id is required${NC}"
-    echo "Usage: $0 <project_id>"
+    echo "Usage: $0 [--simulation] [--include-backlog] <project_id>"
     exit 1
+fi
+
+if [[ "$SIMULATION" == "true" ]]; then
+    echo -e "${CYAN}[SIMULATION MODE] No changes will be made${NC}"
 fi
 
 # Load env for VIBE_KANBAN_PORT
@@ -67,19 +101,24 @@ if ! echo "$statuses_json" | jq -e '.project_statuses' > /dev/null 2>&1; then
     exit 1
 fi
 
-# Get Done and Cancelled status IDs
-done_cancelled_ids=$(echo "$statuses_json" | jq -r '
-    .project_statuses[]
-    | select(.name == "Done" or .name == "Cancelled")
-    | .id
-')
+# Get Done and Cancelled (and optionally Backlog) status IDs
+if [[ "$INCLUDE_BACKLOG" == "true" ]]; then
+    target_statuses_filter='.name == "Done" or .name == "Cancelled" or .name == "Backlog"'
+    target_statuses_label="Done/Cancelled/Backlog"
+else
+    target_statuses_filter='.name == "Done" or .name == "Cancelled"'
+    target_statuses_label="Done/Cancelled"
+fi
+
+done_cancelled_ids=$(echo "$statuses_json" | jq -r \
+    ".project_statuses[] | select(${target_statuses_filter}) | .id")
 
 if [[ -z "$done_cancelled_ids" ]]; then
-    echo -e "${YELLOW}No Done or Cancelled statuses found in this project.${NC}"
+    echo -e "${YELLOW}No ${target_statuses_label} statuses found in this project.${NC}"
     exit 0
 fi
 
-echo -e "${BLUE}Fetching issues in Done/Cancelled status...${NC}"
+echo -e "${BLUE}Fetching issues in ${target_statuses_label} status...${NC}"
 issues_json=$(remote_api GET "/v1/fallback/issues?project_id=${PROJECT_ID}&limit=500")
 if ! echo "$issues_json" | jq -e '.issues' > /dev/null 2>&1; then
     echo -e "${RED}Error fetching issues:${NC}"
@@ -95,7 +134,7 @@ done_issue_ids=$(echo "$issues_json" | jq -r --argjson status_ids "$(echo "$done
 ')
 
 issue_count=$(echo "$done_issue_ids" | grep -c . 2>/dev/null || echo 0)
-echo -e "${GREEN}Found ${issue_count} issues in Done/Cancelled status${NC}"
+echo -e "${GREEN}Found ${issue_count} issues in ${target_statuses_label} status${NC}"
 
 if [[ -z "$done_issue_ids" ]]; then
     echo "Nothing to do."
@@ -130,6 +169,12 @@ for issue_id in $done_issue_ids; do
         continue
     fi
 
+    if [[ "$SIMULATION" == "true" ]]; then
+        echo -e "  ${CYAN}[DRY RUN]${NC} Would unlink and delete workspace for ${simple_id}: ${issue_title} (workspace: ${local_ws_id})"
+        ((deleted++)) || true
+        continue
+    fi
+
     echo -e "  ${BLUE}Processing${NC} ${simple_id}: ${issue_title} (workspace: ${local_ws_id})"
 
     # Unlink the workspace from the issue
@@ -152,6 +197,11 @@ for issue_id in $done_issue_ids; do
 done
 
 echo ""
-echo -e "${GREEN}Done!${NC}"
-echo -e "  Deleted: ${deleted}"
-echo -e "  Skipped (no workspace): ${skipped}"
+if [[ "$SIMULATION" == "true" ]]; then
+    echo -e "${CYAN}[SIMULATION] Would have deleted: ${deleted}${NC}"
+    echo -e "${CYAN}[SIMULATION] Would have skipped (no workspace): ${skipped}${NC}"
+else
+    echo -e "${GREEN}Done!${NC}"
+    echo -e "  Deleted: ${deleted}"
+    echo -e "  Skipped (no workspace): ${skipped}"
+fi
