@@ -27,9 +27,6 @@ else
     echo "  LINEAR_EMAIL=..."
     echo "  VIBE_KANBAN_PORT=..."
     echo "  VIBE_PROJECT_ID=...    # UUID of the vibe-kanban remote project"
-    echo "  VIBE_REPO_ID=...       # UUID of the repo in vibe-kanban (from /api/repos)"
-    echo "  VIBE_TARGET_BRANCH=... # Optional: target branch (default: main)"
-    echo "  VIBE_EXECUTOR=...      # Optional: executor (default: CLAUDE_CODE)"
     exit 1
 fi
 
@@ -61,12 +58,6 @@ validate_env() {
         missing=1
     fi
 
-    if [[ -z "$VIBE_REPO_ID" ]]; then
-        echo -e "${RED}Error: VIBE_REPO_ID is not set${NC}"
-        echo "  Set the vibe-kanban repo UUID (run: curl http://127.0.0.1:\$VIBE_KANBAN_PORT/api/repos)"
-        missing=1
-    fi
-
     if [[ $missing -eq 1 ]]; then
         echo ""
         echo "Add missing variables to: $ENV_FILE"
@@ -80,9 +71,6 @@ validate_env
 VIBE_KANBAN_URL="http://127.0.0.1:${VIBE_KANBAN_PORT}"
 VIBE_REMOTE_URL="https://api.vibekanban.com"
 LINEAR_API_URL="https://api.linear.app/graphql"
-VIBE_TARGET_BRANCH="${VIBE_TARGET_BRANCH:-main}"
-VIBE_EXECUTOR="${VIBE_EXECUTOR:-CLAUDE_CODE}"
-
 echo -e "${BLUE}Syncing Linear tasks for ${LINEAR_EMAIL}...${NC}"
 
 # Fetch a fresh auth token from the local vibe-kanban server (called per-request, token TTL is ~2 min)
@@ -160,31 +148,6 @@ create_project_issue() {
             --arg status_id "$status_id" \
             '{id: $id, project_id: $project_id, title: $title, description: $desc,
               status_id: $status_id, sort_order: 0, extension_metadata: {}}')"
-}
-
-# Create a workspace in vibe-kanban linked to a project issue
-create_linked_workspace() {
-    local name="$1"
-    local prompt="$2"
-    local issue_id="$3"
-
-    curl -s -X POST "${VIBE_KANBAN_URL}/api/task-attempts/create-and-start" \
-        -H "Content-Type: application/json" \
-        --data-binary "$(jq -n \
-            --arg name "$name" \
-            --arg prompt "$prompt" \
-            --arg repo_id "$VIBE_REPO_ID" \
-            --arg branch "$VIBE_TARGET_BRANCH" \
-            --arg executor "$VIBE_EXECUTOR" \
-            --arg issue_id "$issue_id" \
-            --arg project_id "$VIBE_PROJECT_ID" \
-            '{
-                name: $name,
-                prompt: $prompt,
-                executor_config: {executor: $executor, variant: "DEFAULT"},
-                repos: [{repo_id: $repo_id, target_branch: $branch}],
-                linked_issue: {remote_project_id: $project_id, issue_id: $issue_id}
-            }')"
 }
 
 # Map Linear status type/name to vibe-kanban status name
@@ -309,21 +272,7 @@ main() {
                 continue
             fi
 
-            local vibe_issue_id
-            vibe_issue_id=$(echo "$create_result" | jq -r '.data.id')
-
-            # Create a workspace linked to the issue
-            local workspace_prompt
-            workspace_prompt="$(printf '%s\n\nStatus: %s\nLinear: %s\n\n%s' "$title" "$status_name" "$url" "$description")"
-            local ws_result
-            ws_result=$(create_linked_workspace "$issue_title" "$workspace_prompt" "$vibe_issue_id")
-
-            if echo "$ws_result" | jq -e '.success == true' > /dev/null 2>&1; then
-                ((created++)) || true
-            else
-                echo -e "  ${RED}Failed${NC} to create workspace for ${identifier}:"
-                echo "$ws_result" | jq -r '.message // .error_data // .'
-            fi
+            ((created++)) || true
         fi
     done
 
