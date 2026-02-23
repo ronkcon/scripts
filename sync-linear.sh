@@ -85,8 +85,8 @@ VIBE_EXECUTOR="${VIBE_EXECUTOR:-CLAUDE_CODE}"
 
 echo -e "${BLUE}Syncing Linear tasks for ${LINEAR_EMAIL}...${NC}"
 
-# Fetch a fresh auth token from the local vibe-kanban server
-fetch_vibe_token() {
+# Fetch a fresh auth token from the local vibe-kanban server (called per-request, token TTL is ~2 min)
+vibe_token() {
     local token
     token=$(curl -s "${VIBE_KANBAN_URL}/api/auth/token" | jq -r '.data.access_token // empty')
     if [[ -z "$token" ]]; then
@@ -95,6 +95,18 @@ fetch_vibe_token() {
         exit 1
     fi
     echo "$token"
+}
+
+# Wrapper: call the remote API with a fresh token each time
+remote_api() {
+    local method="$1"
+    local path="$2"
+    shift 2
+    curl -s -X "$method" "${VIBE_REMOTE_URL}${path}" \
+        -H "Authorization: Bearer $(vibe_token)" \
+        -H "X-Client-Version: 0.1.18" \
+        -H "X-Client-Type: frontend" \
+        "$@"
 }
 
 # Fetch issues from Linear assigned to the user
@@ -123,35 +135,22 @@ fetch_linear_issues() {
 
 # Fetch project statuses from vibe-kanban remote
 fetch_project_statuses() {
-    local token="$1"
-    curl -s "${VIBE_REMOTE_URL}/v1/fallback/project_statuses?project_id=${VIBE_PROJECT_ID}" \
-        -H "Authorization: Bearer $token" \
-        -H "X-Client-Version: 0.1.18" \
-        -H "X-Client-Type: frontend"
+    remote_api GET "/v1/fallback/project_statuses?project_id=${VIBE_PROJECT_ID}"
 }
 
 # Fetch existing issues from vibe-kanban project
 fetch_project_issues() {
-    local token="$1"
-    local offset="${2:-0}"
-    curl -s "${VIBE_REMOTE_URL}/v1/fallback/issues?project_id=${VIBE_PROJECT_ID}&limit=200&offset=${offset}" \
-        -H "Authorization: Bearer $token" \
-        -H "X-Client-Version: 0.1.18" \
-        -H "X-Client-Type: frontend"
+    remote_api GET "/v1/fallback/issues?project_id=${VIBE_PROJECT_ID}&limit=200"
 }
 
 # Create a vibe-kanban issue in the project
 create_project_issue() {
-    local token="$1"
-    local issue_id="$2"
-    local title="$3"
-    local description="$4"
-    local status_id="$5"
+    local issue_id="$1"
+    local title="$2"
+    local description="$3"
+    local status_id="$4"
 
-    curl -s -X POST "${VIBE_REMOTE_URL}/v1/issues" \
-        -H "Authorization: Bearer $token" \
-        -H "X-Client-Version: 0.1.18" \
-        -H "X-Client-Type: frontend" \
+    remote_api POST "/v1/issues" \
         -H "Content-Type: application/json" \
         --data-binary "$(jq -n \
             --arg id "$issue_id" \
@@ -216,13 +215,12 @@ new_uuid() {
 
 # Main sync logic
 main() {
-    echo -e "${YELLOW}Fetching auth token from vibe-kanban...${NC}"
-    local token
-    token=$(fetch_vibe_token)
+    echo -e "${YELLOW}Verifying vibe-kanban auth...${NC}"
+    vibe_token > /dev/null  # fail fast if not authenticated
 
     echo -e "${YELLOW}Fetching project statuses...${NC}"
     local statuses_json
-    statuses_json=$(fetch_project_statuses "$token")
+    statuses_json=$(fetch_project_statuses)
     if ! echo "$statuses_json" | jq -e '.project_statuses' > /dev/null 2>&1; then
         echo -e "${RED}Error fetching project statuses:${NC}"
         echo "$statuses_json"
@@ -231,7 +229,7 @@ main() {
 
     echo -e "${YELLOW}Fetching existing project issues...${NC}"
     local issues_json
-    issues_json=$(fetch_project_issues "$token")
+    issues_json=$(fetch_project_issues)
     local existing_issues
     existing_issues=$(echo "$issues_json" | jq -r '.issues // []')
 
@@ -304,7 +302,7 @@ main() {
             local new_issue_id
             new_issue_id=$(new_uuid)
             local create_result
-            create_result=$(create_project_issue "$token" "$new_issue_id" "$issue_title" "$issue_desc" "$status_id")
+            create_result=$(create_project_issue "$new_issue_id" "$issue_title" "$issue_desc" "$status_id")
 
             if ! echo "$create_result" | jq -e '.data.id' > /dev/null 2>&1; then
                 echo -e "  ${RED}Failed${NC} to create issue for ${identifier}: $create_result"
