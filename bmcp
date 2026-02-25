@@ -15,8 +15,8 @@ if [[ ${#all_files[@]} -eq 0 ]]; then
   exit 1
 fi
 
-# Build display names and tokens (zsh arrays are 1-indexed)
-typeset -a names tokens
+# Build display names, tokens, and md paths (zsh arrays are 1-indexed)
+typeset -a names tokens md_files
 
 for f in "${all_files[@]}"; do
   # Skip .md sidecar files
@@ -34,6 +34,7 @@ for f in "${all_files[@]}"; do
 
   names+=("$_name")
   tokens+=("$_tok")
+  md_files+=("$_md")
 done
 unset _tok _name _md
 
@@ -52,26 +53,30 @@ tok = auth.removeprefix('Bearer ').strip()
 print(tok[:16] + '...' if len(tok) > 16 else tok)
 " 2>/dev/null) || _cur="(unknown)"
 
-echo "Current token: $_cur"
-echo ""
-echo "Available Beacon API tokens:"
-for i in {1..${#names[@]}}; do
-  printf "  %d) %s  [%s...]\n" $i "${names[$i]}" "${tokens[$i]:0:16}"
-done
-echo ""
+# Use fzf to select a token; pipe "name\tmd_path" and show md file as preview
+_selected_name=$(
+  for i in {1..${#names[@]}}; do
+    printf "%s\t%s\n" "${names[$i]}" "${md_files[$i]}"
+  done | fzf --prompt="Beacon token > " \
+             --header="Current: $_cur" \
+             --height=~15 \
+             --layout=reverse \
+             --no-info \
+             --delimiter='\t' \
+             --with-nth=1 \
+             --preview='cat {2}' \
+             --preview-window=right:40%:wrap \
+   | cut -f1
+) || { echo "No selection made." >&2; exit 1; }
 
-# Prompt for selection
-_choice=""
-while true; do
-  read "_choice?Select token [1-${#names[@]}]: "
-  if [[ "$_choice" =~ ^[0-9]+$ ]] && (( _choice >= 1 && _choice <= ${#names[@]} )); then
+# Look up the token for the selected name
+_selected_token=""
+for i in {1..${#names[@]}}; do
+  if [[ "${names[$i]}" == "$_selected_name" ]]; then
+    _selected_token="${tokens[$i]}"
     break
   fi
-  echo "Invalid choice. Enter a number between 1 and ${#names[@]}."
 done
-
-_selected_name="${names[$_choice]}"
-_selected_token="${tokens[$_choice]}"
 _new_auth="Bearer ${_selected_token}"
 
 # Update all Authorization bearer headers in ~/.claude.json
