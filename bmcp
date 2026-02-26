@@ -1,0 +1,117 @@
+#!/usr/bin/env zsh
+# bmcp - Beacon MCP token switcher
+# Switches the active Beacon API token used in ~/.claude.json
+
+set -euo pipefail
+
+BEACON_CONFIG_DIR="${HOME}/.config/beacon"
+CLAUDE_JSON="${HOME}/.claude.json"
+
+# Find all token files (including .md sidecars — filtered below)
+all_files=("${BEACON_CONFIG_DIR}"/.beacon-api-token.*(N))
+
+if [[ ${#all_files[@]} -eq 0 ]]; then
+  echo "No Beacon API token files found in $BEACON_CONFIG_DIR" >&2
+  exit 1
+fi
+
+# Build display names, tokens, and md paths (zsh arrays are 1-indexed)
+typeset -a names tokens md_files
+
+for f in "${all_files[@]}"; do
+  # Skip .md sidecar files
+  [[ "$f" == *.md ]] && continue
+
+  _tok=$(< "$f" tr -d '[:space:]')
+  [[ -z "$_tok" ]] && continue
+
+  _name=""
+  _md="${f}.md"
+  if [[ -f "$_md" ]]; then
+    _name=$(grep -i '^Name:' "$_md" | sed 's/^Name:[[:space:]]*//' | head -1)
+  fi
+  [[ -z "$_name" ]] && _name=$(basename "$f" | sed 's/^\.beacon-api-token\.//')
+
+  names+=("$_name")
+  tokens+=("$_tok")
+  md_files+=("$_md")
+done
+unset _tok _name _md
+
+if [[ ${#names[@]} -eq 0 ]]; then
+  echo "No readable Beacon API tokens found." >&2
+  exit 1
+fi
+
+# Show current token (abbreviated)
+_cur=$(python3 -c "
+import json
+with open('$CLAUDE_JSON') as f:
+    d = json.load(f)
+auth = d.get('mcpServers', {}).get('beacon', {}).get('headers', {}).get('Authorization', '')
+tok = auth.removeprefix('Bearer ').strip()
+print(tok[:16] + '...' if len(tok) > 16 else tok)
+" 2>/dev/null) || _cur="(unknown)"
+
+# Use fzf to select a token; pipe "name\tmd_path" and show md file as preview
+_selected_name=$(
+  for i in {1..${#names[@]}}; do
+    printf "%s\t%s\n" "${names[$i]}" "${md_files[$i]}"
+  done | fzf --prompt="Beacon token > " \
+             --header="Current: $_cur" \
+             --height=~15 \
+             --layout=reverse \
+             --no-info \
+             --delimiter='\t' \
+             --with-nth=1 \
+             --preview='cat {2}' \
+             --preview-window=right:40%:wrap \
+   | cut -f1
+) || { echo "No selection made." >&2; exit 1; }
+
+# Look up the token for the selected name
+_selected_token=""
+for i in {1..${#names[@]}}; do
+  if [[ "${names[$i]}" == "$_selected_name" ]]; then
+    _selected_token="${tokens[$i]}"
+    break
+  fi
+done
+_new_auth="Bearer ${_selected_token}"
+
+# Update all Authorization bearer headers in ~/.claude.json
+python3 - <<PYEOF
+import json, sys
+
+with open('$CLAUDE_JSON', 'r') as f:
+    data = json.load(f)
+
+count = 0
+
+def update_auth(obj):
+    global count
+    if isinstance(obj, dict):
+        for k in list(obj):
+            if k == 'Authorization' and isinstance(obj[k], str) and obj[k].lower().startswith('bearer '):
+                obj[k] = '$_new_auth'
+                count += 1
+            else:
+                update_auth(obj[k])
+    elif isinstance(obj, list):
+        for item in obj:
+            update_auth(item)
+
+update_auth(data)
+
+if count == 0:
+    print('Warning: no Authorization bearer headers found in $CLAUDE_JSON', file=sys.stderr)
+    sys.exit(1)
+
+with open('$CLAUDE_JSON', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+
+print(f'Updated {count} Authorization header(s).')
+PYEOF
+
+echo "Switched to: $_selected_name"
