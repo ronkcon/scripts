@@ -7,14 +7,6 @@ alias av='. awsvault'
 
 alias asso='aws sso login --profile'
 
-# vibe-kanban autocomplete
-_vibe_kanban() {
-    local -a commands
-    commands=(start stop status)
-    _describe 'command' commands
-}
-compdef _vibe_kanban vibe-kanban
-
 path=(
   ${HOME}/.local/bin
   ${HOME}/code/work/ronkcon/scripts
