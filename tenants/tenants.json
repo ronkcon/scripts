@@ -1,0 +1,23 @@
+[
+    { "name": "Albertsons", "codename": "Aperol", "tenantId": "TBD" },
+    { "name": "Alphasence", "codename": "Albarino", "tenantId": "TBD" },
+    { "name": "Apollo.io", "codename": "Appletini", "tenantId": "TBD" },
+    { "name": "Atlassian", "codename": "Amaretto", "tenantId": "TBD" },
+    { "name": "Cato Networks", "codename": "Campari", "tenantId": "TBD" },
+    { "name": "Cava", "codename": "Cognac", "tenantId": "TBD" },
+    { "name": "Cerebras", "codename": "Chartreuse", "tenantId": "ch47az" },
+    { "name": "Checkpoint", "codename": "Champagne", "tenantId": "TBD" },
+    { "name": "DMS", "codename": "Dramboui", "tenantId": "TBD" },
+    { "name": "Dayforce", "codename": "Daiquiri", "tenantId": "TBD" },
+    { "name": "Fullpath", "codename": "Finlandia", "tenantId": "TBD" },
+    { "name": "KKR", "codename": "Kraken", "tenantId": "TBD" },
+    { "name": "Klaviyo", "codename": "Kahlua", "tenantId": "TBD" },
+    { "name": "Lemonade", "codename": "Limoncello", "tenantId": "TBD" },
+    { "name": "Macabbi", "codename": "Mezcal", "tenantId": "TBD" },
+    { "name": "Moovit", "codename": "Martini", "tenantId": "TBD" },
+    { "name": "Motorolla", "codename": "Mojito", "tenantId": "TBD" },
+    { "name": "Pros", "codename": "Prosseco", "tenantId": "TBD" },
+    { "name": "Sofi", "codename": "Soju", "tenantId": "sw10nx" },
+    { "name": "TriNetX", "codename": "Triple Sec", "tenantId": "TBD" },
+    { "name": "UiPath", "codename": "Underberg", "tenantId": "TBD" }
+]
