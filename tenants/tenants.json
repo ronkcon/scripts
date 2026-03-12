@@ -9,6 +9,7 @@
     { "name": "Checkpoint", "codename": "Champagne", "tenantId": "c16amp" },
     { "name": "DMS", "codename": "Dramboui", "tenantId": "d7am91" },
     { "name": "Dayforce", "codename": "Daiquiri", "tenantId": "df4opr" },
+    { "name": "Fico", "codename": "Fireball", "tenantId": "TBD" },
     { "name": "Fullpath", "codename": "Finlandia", "tenantId": "bprl9v" },
     { "name": "KKR", "codename": "Kraken", "tenantId": "k76k9n" },
     { "name": "Klaviyo", "codename": "Kahlua", "tenantId": "k6h106" },
