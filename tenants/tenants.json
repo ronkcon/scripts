@@ -19,6 +19,7 @@
     { "name": "Motorolla", "codename": "Mojito", "tenantId": "mo917o" },
     { "name": "Pros", "codename": "Prosseco", "tenantId": "pi8dx2" },
     { "name": "Sofi", "codename": "Soju", "tenantId": "sw10nx" },
+    { "name": "Temporal", "codename": "tequila", "tenantId": "TBD" },
     { "name": "TriNetX", "codename": "Triple Sec", "tenantId": "by40o7" },
     { "name": "UiPath", "codename": "Underberg", "tenantId": "up21tn" }
 ]
