@@ -1,0 +1,116 @@
+function analyzeDir() {
+    DIR=$1
+    FILE_LIST=$(mktemp)
+    echo "Listing $DIR (this may take time)"
+    echo "DATE,TIME,SIZE,INTEGRATION_ID,YEAR,MONTH,DAY,HOUR,FILE_NAME" > $FILE_LIST
+    aws s3 ls --recursive $DIR | awk -F'[ /]+' '{print $1","$2","$3","$5","$6","$7","$8","$9","$10}' >> $FILE_LIST    
+    INIT_SCRIPT=$(mktemp)
+    echo "CREATE OR REPLACE MACRO size_pretty(bytes) AS (SELECT CASE WHEN bytes < 1024 THEN bytes || 'B' ELSE round((bytes / power(1024, floor(log(bytes) / log(1024)))), 2) || ' ' || substr('BKMGTPEZY', (floor(log(bytes) / log(1024) + 1))::INT, 1) || 'iB' END AS size_pretty);" > $INIT_SCRIPT
+    echo "CREATE TABLE files AS SELECT * FROM read_csv('$FILE_LIST');" >> $INIT_SCRIPT
+
+    echo "File list written into a temp file: $FILE_LIST"
+    echo "Use 'select * from files' to query it"
+    echo "use size_pretty( column ) to convert bytes to human readable values"
+    duckdb -init $INIT_SCRIPT
+}
+
+function watchFlinkDeployment() {
+    STREAM_ID="$1"
+    kubectl get flinkdeployments.flink.apache.org -A --watch | rg $STREAM_ID
+}
+
+function tailJMFiles() {
+    STREAM_ID="$1"
+    stern -n beacon $STREAM_ID --exclude-pod taskmanager --include Latest
+}
+
+function showBdag() {
+    STREAM_NAME="$1" 
+    TEMP_BDAG=$(mktemp)
+    kubectl get cm ${STREAM_NAME}-bdag-config -oyaml | yq '.data."bdag.flink.yaml"' > $TEMP_BDAG
+    TYPE=$(jq empty "$TEMP_BDAG" 2>/dev/null && echo "JSON" || echo "YAML")
+    if [[ ${TYPE} == "JSON" ]]; then
+        cat ${TEMP_BDAG} | jq | bat -l json
+    else
+        bat -l yaml ${TEMP_BDAG}
+    fi
+    #rm ${TEMP_BDAG}
+} 
+
+function listStreams() {
+    kubectl get flinkdeployments.flink.apache.org -A | awk '{printf "%-15s\t%s\n", $1, $2}'
+}
+
+function assumeRole() {
+    if [[ "$1" == "-r" || "$1" == "--reset" ]]; then
+        unset AWS_ACCESS_KEY_ID
+        unset AWS_SECRET_ACCESS_KEY
+        unset AWS_SESSION_TOKEN
+        unset ROLE_ARN
+        unset ROLE_EXTERNAL_ID
+        echo "assumeRole: AWS credentials cleared."
+        return 0
+    fi
+
+    if [[ -z "$1" ]]; then
+        echo "usage: assumeRole <integration-id> | assumeRole -r"
+        return 1
+    fi
+
+    unset AWS_ACCESS_KEY_ID
+    unset AWS_SECRET_ACCESS_KEY
+    unset AWS_SESSION_TOKEN
+
+    local integration_id="$1"
+    local sts_name="b-${integration_id}-vector"
+    local sts_yaml
+    sts_yaml=$(mktemp)
+    local temp_creds
+    temp_creds=$(mktemp)
+
+    echo "assumeRole: fetching statefulset ${sts_name}..."
+    kubectl get statefulset "${sts_name}" -o yaml > "${sts_yaml}" || return 1
+
+    echo "assumeRole: resolving secret references..."
+    local role_arn_secret
+    role_arn_secret=$(yq '.spec.template.spec.containers[0].env[] | select(.name=="S3_INPUT__ROLE_ARN" or .name=="ROLE_ARN") | .valueFrom.secretKeyRef.name' "${sts_yaml}")
+    local role_arn_key
+    role_arn_key=$(yq '.spec.template.spec.containers[0].env[] | select(.name=="S3_INPUT__ROLE_ARN" or .name=="ROLE_ARN") | .valueFrom.secretKeyRef.key' "${sts_yaml}")
+    local role_external_id_secret
+    role_external_id_secret=$(yq '.spec.template.spec.containers[0].env[] | select(.name=="S3_INPUT__ROLE_EXTERNAL_ID" or .name=="EXTERNAL_ID") | .valueFrom.secretKeyRef.name' "${sts_yaml}")
+    local role_external_id_key
+    role_external_id_key=$(yq '.spec.template.spec.containers[0].env[] | select(.name=="S3_INPUT__ROLE_EXTERNAL_ID" or .name=="EXTERNAL_ID") | .valueFrom.secretKeyRef.key' "${sts_yaml}")
+
+    if [[ -z "${role_arn_secret}" || -z "${role_arn_key}" || -z "${role_external_id_secret}" || -z "${role_external_id_key}" ]]; then
+        echo "assumeRole: missing secret references in ${sts_name}"
+        rm -f "${sts_yaml}" "${temp_creds}"
+        return 1
+    fi
+
+    echo "assumeRole: fetching secrets..."
+    export ROLE_ARN
+    ROLE_ARN=$(kubectl get secret "${role_arn_secret}" -o jsonpath="{.data.${role_arn_key}}" | base64 -d)
+    export ROLE_EXTERNAL_ID
+    ROLE_EXTERNAL_ID=$(kubectl get secret "${role_external_id_secret}" -o jsonpath="{.data.${role_external_id_key}}" | base64 -d)
+
+    echo "assumeRole: assuming role..."
+    aws sts assume-role \
+        --role-arn "${ROLE_ARN}" \
+        --role-session-name "assumeRole-${USER}" \
+        --external-id "${ROLE_EXTERNAL_ID}" \
+        --output json > "${temp_creds}"
+
+    echo "assumeRole: exporting credentials..."
+    export AWS_ACCESS_KEY_ID
+    AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' "${temp_creds}")
+    export AWS_SECRET_ACCESS_KEY
+    AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' "${temp_creds}")
+    export AWS_SESSION_TOKEN
+    AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' "${temp_creds}")
+
+    rm -f "${sts_yaml}" "${temp_creds}"
+    echo "assumeRole: done."
+}
+
+export BUCKET="s3://${AWS_PROFILE}-production-${AWS_REGION}-transport"
+export FLINK_ARTIFACTS="s3://${AWS_PROFILE}-production-${AWS_REGION}-transport/flink-artifacts"
