@@ -40,7 +40,7 @@ function showBdag() {
 } 
 
 function listStreams() {
-    kubectl get flinkdeployments.flink.apache.org -A | awk '{printf "%-15s\t%s\n", $1, $2}'
+    kubectl get flinkdeployments.flink.apache.org -A | awk '{printf "%-15s\t%-50s\t%-10s\t%-10s\n", $1, $2, $3, $4}'
 }
 
 function assumeRole() {
