@@ -40,9 +40,8 @@ function showBdag() {
 } 
 
 function listStreams() {
-    kubectl get flinkdeployments.flink.apache.org -A | awk '{printf "%-15s\t%-50s\t%-10s\t%-10s\n", $1, $2, $3, $4}'
+    kubectl get flinkdeployments.flink.apache.org -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,JOB STATUS:.status.jobStatus.state,LIFECYCLE STATE:.status.lifecycleState,IMAGE:.spec.image' | awk '{n=split($NF,a,":");v=(NR==1?"VERSION":a[n]);printf "%-15s\t%-50s\t%-10s\t%-10s\t%-15s\n",$1,$2,$3,$4,v}'
 }
-
 function assumeRole() {
     if [[ "$1" == "-r" || "$1" == "--reset" ]]; then
         unset AWS_ACCESS_KEY_ID
