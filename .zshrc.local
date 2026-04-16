@@ -19,7 +19,7 @@ path=(
 export RONKCON_CODE_ROOT="${WORK_CODE_ROOT}/ronkcon"
 
 if [[ -d ${RONKCON_CODE_ROOT:-} ]]; then
-  for file in "${RONKCON_CODE_ROOT}"/*/.go.here; do
+  for file in "${RONKCON_CODE_ROOT}"/*/.go.here(N); do
     [[ -f $file ]] || continue
     BASE_DIR=$RONKCON_CODE_ROOT source "$file"
   done
