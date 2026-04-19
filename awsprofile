@@ -2,10 +2,13 @@
 
 PATTERN=$(echo $* | sed 's/ /\.\*/g')
 
+SORTED_PROFILES=$(mktemp)
 TEMP_LIST_FILE=$(mktemp)
 
-cat ~/.aws/config | egrep '^\[profile.*' | tr -d '[]' | sed 's|^profile ||' | grep -E -i "^${PATTERN}$" > ${TEMP_LIST_FILE}
-cat ~/.aws/config | egrep '^\[profile.*' | tr -d '[]' | sed 's|^profile ||' | grep -E -i "${PATTERN}" | grep -E -i -v "^${PATTERN}$" | sort >> ${TEMP_LIST_FILE}
+yq -p ini -o tsv 'keys | .[] | select(. == "profile *") | sub("^profile ", "")' ~/.aws/config > ${SORTED_PROFILES}
+
+cat ${SORTED_PROFILES} | grep -E -i "^${PATTERN}$" > ${TEMP_LIST_FILE}
+cat ${SORTED_PROFILES} | grep -E -i "${PATTERN}" | grep -E -i -v "^${PATTERN}$" >> ${TEMP_LIST_FILE}
 
 if [[ "$(cat "${TEMP_LIST_FILE}" | wc -l)" -eq "1" ]]
 then
