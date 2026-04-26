@@ -1,0 +1,25 @@
+#!/bin/zsh
+# Must be sourced: . set_kubernetes_context <context>
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]] 2>/dev/null || [[ "$ZSH_EVAL_CONTEXT" == "toplevel" ]]; then
+  echo "Error: must be sourced, not executed. Run: . set_kubernetes_context <context>" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+if [[ -z "$1" ]]; then
+  echo "Usage: . set_kubernetes_context <context>" >&2
+  return 1
+fi
+
+CONTEXT="$1"
+
+alias k="kubectl --context=${CONTEXT}"
+alias kgp="kubectl --context=${CONTEXT} get pods"
+alias kl="kubectl --context=${CONTEXT} logs"
+alias klf="kubectl --context=${CONTEXT} logs -f"
+alias kdp="kubectl --context=${CONTEXT} describe pods"
+alias kdelp="kubectl --context=${CONTEXT} delete pods"
+alias kgcm="kubectl --context=${CONTEXT} get configmaps"
+alias stern="stern --context=${CONTEXT}"
+
+echo "kubectl context set to: ${CONTEXT}"

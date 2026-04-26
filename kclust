@@ -1,0 +1,47 @@
+#!/bin/bash
+# beacon-tmux.sh
+
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <context> [session-name]"
+    exit 1
+fi
+
+CONTEXT="$1"
+SESSION="${2:-beacon-$CONTEXT}"
+
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+
+# Create session
+TL=$(tmux new-session -d -s "$SESSION" -n main -e "CONTEXT=$CONTEXT" -P -F '#{pane_id}')
+
+# Get the actual window dimensions
+WIN_W=$(tmux display-message -t "$SESSION:main" -p '#{window_width}')
+WIN_H=$(tmux display-message -t "$SESSION:main" -p '#{window_height}')
+
+TOP_LEFT_W=$(( WIN_W * 35 / 100 ))
+BOT_LEFT_W=$(( WIN_W * 1 / 100 ))
+TOP_H=$(( WIN_H / 2 ))
+
+# Split horizontally first -> two rows
+BL=$(tmux split-window -v -t "$TL" -e "CONTEXT=$CONTEXT" -P -F '#{pane_id}')
+tmux resize-pane -t "$TL" -y "$TOP_H"
+
+# Split top row -> top-right
+TR=$(tmux split-window -h -t "$TL" -e "CONTEXT=$CONTEXT" -P -F '#{pane_id}')
+# Now resize the TOP-LEFT pane to the absolute column count we want
+tmux resize-pane -t "$TL" -x "$TOP_LEFT_W"
+
+# Split bottom row -> bottom-right
+BR=$(tmux split-window -h -t "$BL" -e "CONTEXT=$CONTEXT" -P -F '#{pane_id}')
+tmux resize-pane -t "$BL" -x "$BOT_LEFT_W"
+
+# Send commands - adjust which pane gets what if needed
+tmux send-keys -t "$TL" "k9s --context $CONTEXT -n beacon -c pods" C-m
+tmux send-keys -t "$BL" "k9s --context $CONTEXT -n beacon -c flinkdeployments.flink.apache.org" C-m
+tmux send-keys -t "$TR" "echo \"CONTEXT=\$CONTEXT\"" C-m
+tmux send-keys -t "$BR" "echo \"CONTEXT=\$CONTEXT\"" C-m
+
+tmux select-pane -t "$TL"
+tmux attach -t "$SESSION"
