@@ -13,6 +13,13 @@ fi
 
 export CONTEXT="$1"
 
+_SKC_CLUSTER_ARN=$(kubectl config get-contexts "${CONTEXT}" --no-headers 2>/dev/null | awk '{print $3}')
+if [[ -n "$_SKC_CLUSTER_ARN" ]]; then
+  export AWS_REGION=$(echo "$_SKC_CLUSTER_ARN" | awk -F: '{print $4}')
+  export AWS_PROFILE=$(yq ".users[] | select(.name == \"${_SKC_CLUSTER_ARN}\") | .user.exec.env[] | select(.name == \"AWS_PROFILE\") | .value" ~/.kube/config)
+fi
+unset _SKC_CLUSTER_ARN
+
 alias k="kubectl --context=${CONTEXT}"
 alias kgp="kubectl --context=${CONTEXT} get pods"
 alias kl="kubectl --context=${CONTEXT} logs"
