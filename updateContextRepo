@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONTEXT_REPO="$HOME/code/work/beacon-security/context"
+LOCAL_REPOS_BASE="$HOME/code/work/beacon-security"
+
+SUBMODULES=(
+  platform
+  beacon-utils
+  core
+  gitops-deployments
+  terraform-live
+  terraform-modules
+)
+
+cd "$CONTEXT_REPO"
+
+echo "==> Deinitializing submodules..."
+for mod in "${SUBMODULES[@]}"; do
+  git submodule deinit -f "$mod" 2>/dev/null || true
+done
+
+echo "==> Reverting local changes to tracked files..."
+git checkout -- . 2>/dev/null || true
+
+echo "==> Removing submodule entries from .git/config..."
+for mod in "${SUBMODULES[@]}"; do
+  git config --remove-section "submodule.$mod" 2>/dev/null || true
+done
+
+echo "==> Removing .gitmodules..."
+rm -f .gitmodules
+
+echo "==> Removing leftover submodule dirs and .git/modules cache..."
+for mod in "${SUBMODULES[@]}"; do
+  rm -rf ".git/modules/$mod"
+  if [ -e "$mod" ] && [ ! -L "$mod" ]; then
+    rm -rf "$mod"
+  fi
+done
+
+echo "==> Creating symlinks to local repos..."
+for mod in "${SUBMODULES[@]}"; do
+  local_path="$LOCAL_REPOS_BASE/$mod"
+  if [ ! -d "$local_path" ]; then
+    echo "  WARNING: $local_path does not exist, skipping $mod"
+    continue
+  fi
+  ln -sfn "$local_path" "$mod"
+  echo "  $mod -> $local_path"
+done
+
+echo "==> Done."
