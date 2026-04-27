@@ -11,7 +11,7 @@ if [[ -z "$1" ]]; then
   return 1
 fi
 
-CONTEXT="$1"
+export CONTEXT="$1"
 
 alias k="kubectl --context=${CONTEXT}"
 alias kgp="kubectl --context=${CONTEXT} get pods"
@@ -21,5 +21,7 @@ alias kdp="kubectl --context=${CONTEXT} describe pods"
 alias kdelp="kubectl --context=${CONTEXT} delete pods"
 alias kgcm="kubectl --context=${CONTEXT} get configmaps"
 alias stern="stern --context=${CONTEXT}"
+alias k9s="\k9s --context=${CONTEXT}"
+alias helm="\helm --kube-context=${CONTEXT}"
 
 echo "kubectl context set to: ${CONTEXT}"
