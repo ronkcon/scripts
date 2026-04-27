@@ -17,6 +17,7 @@ cd "$CONTEXT_REPO"
 
 echo "==> Deinitializing submodules..."
 for mod in "${SUBMODULES[@]}"; do
+  [ -L "$mod" ] && continue
   git submodule deinit -f "$mod" 2>/dev/null || true
 done
 
