@@ -1,0 +1,42 @@
+#!/bin/bash
+# Usage: __kubernetes_cluster_eks <filter> <cluster_name> <iterm_profile> <prompt> [pattern...]
+
+FILTER="$1"
+CLUSTER_NAME="$2"
+ITERM_PROFILE="$3"
+SELECTION_PROMPT="$4"
+PROJECT_DIR="/Users/ronk/code/work/beacon-security/"
+shift 4
+PATTERN=$(echo "$*" | sed 's/ /.*/g')
+
+TEMP_LIST_FILE=$(mktemp)
+kubectl config get-contexts -o name | grep "$FILTER" | grep -E -i "${PATTERN}" > "${TEMP_LIST_FILE}" || true
+
+if [[ "$(wc -l < "${TEMP_LIST_FILE}")" -eq "0" ]]; then
+  echo "No environments found to match the given filter: [$*]" >&2
+  exit 1
+elif [[ "$(wc -l < "${TEMP_LIST_FILE}")" -eq "1" ]]; then
+  CONTEXT_NAME=$(cat "${TEMP_LIST_FILE}")
+else
+  set -euo pipefail
+  CONTEXT_NAME=$(cat "${TEMP_LIST_FILE}" | fzf --prompt="$SELECTION_PROMPT")
+fi
+
+rm -f "${TEMP_LIST_FILE}"
+
+CLUSTER_ARN=$(kubectl config get-contexts "${CONTEXT_NAME}" --no-headers | awk '{print $3}')
+AWS_REGION=$(echo "${CLUSTER_ARN}" | awk -F: '{print $4}')
+AWS_PROFILE=$(yq ".users[] | select(.name == \"${CLUSTER_ARN}\") | .user.exec.env[] | select(.name == \"AWS_PROFILE\") | .value" ~/.kube/config)
+WORKSPACE="${CONTEXT_NAME}"
+
+${HOME}/.iterm2/it2profile -s "$ITERM_PROFILE"
+printf "\e]1337;SetBadgeFormat=%s\a" "$(echo -n "${WORKSPACE}" | base64)"
+
+eks \
+  --workspace-name "$WORKSPACE" \
+  --aws-region "$AWS_REGION" \
+  --aws-profile "$AWS_PROFILE" \
+  --cluster-name "$CLUSTER_NAME" \
+  --project-dir "$PROJECT_DIR"
+
+printf "\e]1337;SetBadgeFormat=%s\a" "$(echo -n "" | base64)"
