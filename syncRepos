@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPOS_FILE="${SCRIPT_DIR}/repos_to_sync"
+
+if [[ ! -f "$REPOS_FILE" ]]; then
+  echo "error: repos_to_sync not found at $REPOS_FILE" >&2
+  exit 1
+fi
+
+RED=$'\e[31m'
+GREEN=$'\e[32m'
+YELLOW=$'\e[33m'
+BLUE=$'\e[34m'
+RESET=$'\e[0m'
+
+synced=()
+skipped_dirty=()
+ahead=()
+failed=()
+
+# Strip blank lines, dedupe while preserving order, expand ${HOME} / $HOME
+mapfile -t repos < <(awk 'NF && !seen[$0]++' "$REPOS_FILE")
+for i in "${!repos[@]}"; do
+  repos[$i]="${repos[$i]//\$\{HOME\}/$HOME}"
+  repos[$i]="${repos[$i]//\$HOME/$HOME}"
+done
+
+for repo in "${repos[@]}"; do
+  echo
+  echo "${BLUE}==> ${repo}${RESET}"
+
+  if [[ ! -d "$repo" ]]; then
+    echo "  ${RED}error:${RESET} directory does not exist"
+    failed+=("$repo (missing)")
+    continue
+  fi
+
+  if ! cd "$repo" 2>/dev/null; then
+    echo "  ${RED}error:${RESET} could not cd into directory"
+    failed+=("$repo (cd failed)")
+    continue
+  fi
+
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "  ${RED}error:${RESET} not a git repository"
+    failed+=("$repo (not a git repo)")
+    continue
+  fi
+
+  # Dirty = staged or unstaged changes (untracked is fine)
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "  ${YELLOW}skip:${RESET} local changes present (staged/unstaged)"
+    skipped_dirty+=("$repo")
+    continue
+  fi
+
+  branch=$(git rev-parse --abbrev-ref HEAD)
+  echo "  branch: $branch"
+
+  if ! git fetch --quiet; then
+    echo "  ${RED}error:${RESET} fetch failed"
+    failed+=("$repo (fetch failed)")
+    continue
+  fi
+
+  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+  if [[ -n "$upstream" ]]; then
+    ahead_count=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)
+    if [[ "${ahead_count:-0}" -gt 0 ]]; then
+      echo "  ${YELLOW}warn:${RESET} $ahead_count unpushed commit(s) ahead of $upstream"
+      ahead+=("$repo ($ahead_count ahead of $upstream)")
+    fi
+  else
+    echo "  ${YELLOW}warn:${RESET} no upstream tracking branch for $branch"
+  fi
+
+  if git pull --rebase --quiet; then
+    echo "  ${GREEN}synced${RESET}"
+    synced+=("$repo")
+  else
+    echo "  ${RED}error:${RESET} pull --rebase failed"
+    failed+=("$repo (pull --rebase failed)")
+  fi
+done
+
+echo
+echo "${BLUE}==================== summary ====================${RESET}"
+echo "${GREEN}synced:${RESET}          ${#synced[@]}"
+echo "${YELLOW}skipped (dirty):${RESET} ${#skipped_dirty[@]}"
+echo "${YELLOW}ahead of origin:${RESET} ${#ahead[@]}"
+echo "${RED}failed:${RESET}          ${#failed[@]}"
+
+if (( ${#skipped_dirty[@]} )); then
+  echo
+  echo "${YELLOW}skipped (dirty):${RESET}"
+  printf '  - %s\n' "${skipped_dirty[@]}"
+fi
+if (( ${#ahead[@]} )); then
+  echo
+  echo "${YELLOW}ahead of origin:${RESET}"
+  printf '  - %s\n' "${ahead[@]}"
+fi
+if (( ${#failed[@]} )); then
+  echo
+  echo "${RED}failed:${RESET}"
+  printf '  - %s\n' "${failed[@]}"
+fi
+
+(( ${#failed[@]} == 0 ))
