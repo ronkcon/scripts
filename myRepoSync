@@ -21,11 +21,13 @@ ahead=()
 failed=()
 
 # Strip blank lines, dedupe while preserving order, expand ${HOME} / $HOME
-mapfile -t repos < <(awk 'NF && !seen[$0]++' "$REPOS_FILE")
-for i in "${!repos[@]}"; do
-  repos[$i]="${repos[$i]//\$\{HOME\}/$HOME}"
-  repos[$i]="${repos[$i]//\$HOME/$HOME}"
-done
+# (avoid `mapfile` — not available in macOS's default bash 3.2)
+repos=()
+while IFS= read -r line; do
+  line="${line//\$\{HOME\}/$HOME}"
+  line="${line//\$HOME/$HOME}"
+  repos+=("$line")
+done < <(awk 'NF && !seen[$0]++' "$REPOS_FILE")
 
 for repo in "${repos[@]}"; do
   echo
