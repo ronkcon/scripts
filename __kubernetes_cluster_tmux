@@ -29,6 +29,14 @@ set -euo pipefail
 
 SESSION="${CONTEXT}"
 
+if [[ "$CONTEXT" == *platform* ]]; then
+  NAMESPACE="app"
+  FLINK_RESOURCE="deployments"
+else
+  NAMESPACE="beacon"
+  FLINK_RESOURCE="flinkdeployments.flink.apache.org"
+fi
+
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   TL=$(tmux new-session -d -s "$SESSION" -n main -P -F '#{pane_id}')
 
@@ -48,8 +56,8 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   BR=$(tmux split-window -h -t "$BL" -P -F '#{pane_id}')
   tmux resize-pane -t "$BL" -x "$BOT_LEFT_W"
 
-  tmux send-keys -t "$TL" ". set_kubernetes_context $CONTEXT && k9s --context $CONTEXT -n beacon -c pods" C-m
-  tmux send-keys -t "$BL" ". set_kubernetes_context $CONTEXT && k9s --context $CONTEXT -n beacon -c flinkdeployments.flink.apache.org" C-m
+  tmux send-keys -t "$TL" ". set_kubernetes_context $CONTEXT && k9s --context $CONTEXT -n $NAMESPACE -c pods" C-m
+  tmux send-keys -t "$BL" ". set_kubernetes_context $CONTEXT && k9s --context $CONTEXT -n $NAMESPACE -c $FLINK_RESOURCE" C-m
   tmux send-keys -t "$TR" ". set_kubernetes_context $CONTEXT" C-m
   tmux send-keys -t "$BR" ". set_kubernetes_context $CONTEXT" C-m
 
