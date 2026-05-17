@@ -30,14 +30,13 @@ while IFS= read -r line; do
 done < <(awk 'NF && !seen[$0]++' "$REPOS_FILE")
 
 for repo in "${repos[@]}"; do
-  echo
-  echo "${BLUE}==> ${repo}${RESET}"
-
+  # Silently skip repos that don't exist on this machine — paths vary across boxes.
   if [[ ! -d "$repo" ]]; then
-    echo "  ${RED}error:${RESET} directory does not exist"
-    failed+=("$repo (missing)")
     continue
   fi
+
+  echo
+  echo "${BLUE}==> ${repo}${RESET}"
 
   if ! cd "$repo" 2>/dev/null; then
     echo "  ${RED}error:${RESET} could not cd into directory"
@@ -51,8 +50,9 @@ for repo in "${repos[@]}"; do
     continue
   fi
 
-  # Dirty = staged or unstaged changes (untracked is fine)
-  if ! git diff --quiet || ! git diff --cached --quiet; then
+  # Dirty = staged or unstaged changes in the parent itself. Submodule
+  # pointer drift is normal for context-style repos and not "dirty".
+  if ! git diff --quiet --ignore-submodules=all || ! git diff --cached --quiet --ignore-submodules=all; then
     echo "  ${YELLOW}skip:${RESET} local changes present (staged/unstaged)"
     skipped_dirty+=("$repo")
     continue
@@ -78,12 +78,30 @@ for repo in "${repos[@]}"; do
     echo "  ${YELLOW}warn:${RESET} no upstream tracking branch for $branch"
   fi
 
-  if git pull --rebase --quiet; then
-    echo "  ${GREEN}synced${RESET}"
-    synced+=("$repo")
+  origin_url=$(git remote get-url origin 2>/dev/null || true)
+  if [[ "$origin_url" =~ /context(\.git)?$ ]]; then
+    # Context: ff-only on parent, then snap submodules to their branch tips
+    # (per .gitmodules). Dirty submodules will fail cleanly — we report partial.
+    if ! git pull --ff-only --quiet; then
+      echo "  ${RED}error:${RESET} pull --ff-only failed (diverged?)"
+      failed+=("$repo (pull --ff-only failed)")
+      continue
+    fi
+    if git submodule update --init --remote --recursive --quiet 2>/dev/null; then
+      echo "  ${GREEN}synced${RESET} (submodules → branch tips)"
+      synced+=("$repo")
+    else
+      echo "  ${YELLOW}warn:${RESET} parent pulled, some submodules failed (likely dirty)"
+      synced+=("$repo (partial)")
+    fi
   else
-    echo "  ${RED}error:${RESET} pull --rebase failed"
-    failed+=("$repo (pull --rebase failed)")
+    if git pull --rebase --quiet; then
+      echo "  ${GREEN}synced${RESET}"
+      synced+=("$repo")
+    else
+      echo "  ${RED}error:${RESET} pull --rebase failed"
+      failed+=("$repo (pull --rebase failed)")
+    fi
   fi
 done
 
