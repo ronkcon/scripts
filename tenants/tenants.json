@@ -8,6 +8,7 @@
     { "name": "Cava", "codename": "Cognac", "tenantId": "coga4q" },
     { "name": "Cerebras", "codename": "Chartreuse", "tenantId": "ch47az", "outpost": true },
     { "name": "Checkpoint", "codename": "Champagne", "tenantId": "c16amp" },
+    { "name": "Demo Lab", "codename": "Demo lab", "tenantId": "demol4" },
     { "name": "DMS", "codename": "Dramboui", "tenantId": "d7am91", "removed": true },
     { "name": "Dayforce", "codename": "Daiquiri", "tenantId": "df4opr", "outpost": true },
     { "name": "Fico", "codename": "Fireball", "tenantId": "F1r960ll" },
