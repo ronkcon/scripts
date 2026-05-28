@@ -23,5 +23,5 @@
     { "name": "Temporal", "codename": "tequila", "tenantId": "T9q01la" },
     { "name": "TriNetX", "codename": "Triple Sec", "tenantId": "by40o7" },
     { "name": "UiPath", "codename": "Underberg", "tenantId": "up21tn" },
-    { "name": "Webflow", "codename": "Weihenstephan", "tenantId": "∫wein12" }
+    { "name": "Webflow", "codename": "Weihenstephan", "tenantId": "wein12" }
 ]
