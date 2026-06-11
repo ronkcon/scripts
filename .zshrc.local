@@ -28,3 +28,8 @@ fi
 cdoutpost() {
    cd /Users/ronk/code/work/beacon-security/core/supervisor/outpost_manager_cli
 }
+
+if command -v bcon &> /dev/null; then
+  bcon completion zsh > "${fpath[1]}/_bcon"
+fi
+
