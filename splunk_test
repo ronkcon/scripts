@@ -1,0 +1,212 @@
+#!/bin/bash
+# Usage: splunk_test <up|down|status|restart|search|send|hec-token|ui|logs|reset> [args]
+#
+# Launch / control a throwaway local Splunk Enterprise for quick tests.
+# Runs the official splunk/splunk image under linux/amd64 (works on Apple
+# Silicon via emulation). Dev license, 500MB/day. State lives in a named
+# Docker volume so events survive `down`/`up`; `reset` wipes everything.
+#
+# Examples:
+#   splunk_test up                 # start (first run provisions ~2min)
+#   splunk_test status             # container + endpoint health
+#   splunk_test send test1 '{"category":"a","user":"avi"}'
+#   splunk_test search 'index=test1'
+#   splunk_test down               # stop+remove container (keeps data volume)
+#   splunk_test reset              # nuke container + data volume
+
+set -uo pipefail
+
+# ---- config (override via env) -------------------------------------------
+CONTAINER="${SPLUNK_TEST_CONTAINER:-splunk-test}"
+VOLUME="${SPLUNK_TEST_VOLUME:-splunk-test-data}"
+IMAGE="${SPLUNK_TEST_IMAGE:-splunk/splunk:latest}"
+PASSWORD="${SPLUNK_TEST_PASSWORD:-Changeme123!}"
+WEB_PORT="${SPLUNK_TEST_WEB_PORT:-8000}"
+HEC_PORT="${SPLUNK_TEST_HEC_PORT:-8088}"
+MGMT_PORT="${SPLUNK_TEST_MGMT_PORT:-8089}"
+
+MGMT="https://localhost:${MGMT_PORT}"
+HEC="https://localhost:${HEC_PORT}"
+WEB="http://localhost:${WEB_PORT}"
+
+# ---- helpers --------------------------------------------------------------
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo ">> $*" >&2; }
+
+need_docker() {
+  command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
+  docker info >/dev/null 2>&1 || die "docker daemon not running"
+}
+
+is_running() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" == "true" ]]
+}
+
+curl_mgmt() { curl -sk -u "admin:${PASSWORD}" "$@"; }
+
+hec_token() {
+  curl_mgmt "${MGMT}/services/data/inputs/http/test?output_mode=json" \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin)["entry"][0]["content"]["token"])' 2>/dev/null
+}
+
+# Wait until Splunk web answers (provisioning + splunkd boot can take minutes
+# under emulation). Bails early if the container dies.
+wait_ready() {
+  local i code
+  info "waiting for Splunk to come up (first run provisions, be patient)..."
+  for i in $(seq 1 150); do
+    if ! is_running; then
+      echo "--- last container logs ---" >&2
+      docker logs "$CONTAINER" 2>&1 | tail -15 >&2
+      die "container exited during startup"
+    fi
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB" 2>/dev/null)
+    if [[ "$code" == "200" || "$code" == "303" ]]; then
+      info "Splunk web is up (HTTP $code)"
+      return 0
+    fi
+    sleep 4
+  done
+  die "timed out waiting for Splunk web on $WEB"
+}
+
+# Enable HTTP Event Collector globally and ensure a token named 'test' exists.
+ensure_hec() {
+  curl_mgmt "${MGMT}/services/data/inputs/http/http/enable" -X POST >/dev/null 2>&1
+  if ! hec_token >/dev/null 2>&1 || [[ -z "$(hec_token)" ]]; then
+    info "creating HEC token 'test'"
+    curl_mgmt "${MGMT}/services/data/inputs/http" \
+      -d name=test -d index=main --data-urlencode disabled=0 >/dev/null 2>&1
+  fi
+}
+
+# Make sure HEC token is allowed to write to the given index (creates index
+# if missing). Splunk requires `index` to be sent alongside `indexes`.
+allow_index() {
+  local idx="$1"
+  [[ "$idx" == "main" ]] && return 0
+  curl_mgmt "${MGMT}/services/data/indexes" -d name="$idx" >/dev/null 2>&1
+  curl_mgmt "${MGMT}/services/data/inputs/http/test" \
+    -d index=main -d indexes="main,${idx}" >/dev/null 2>&1
+}
+
+# ---- commands -------------------------------------------------------------
+cmd_up() {
+  need_docker
+  if is_running; then info "already running"; cmd_status; return 0; fi
+  # Stopped-but-present container: just restart it.
+  if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    info "starting existing container"
+    docker start "$CONTAINER" >/dev/null
+  else
+    info "creating container '$CONTAINER' (image $IMAGE, amd64)"
+    docker run -d --name "$CONTAINER" --platform linux/amd64 \
+      -p "${WEB_PORT}:8000" -p "${HEC_PORT}:8088" -p "${MGMT_PORT}:8089" \
+      -v "${VOLUME}:/opt/splunk/var" \
+      -e SPLUNK_GENERAL_TERMS='--accept-sgt-current-at-splunk-com' \
+      -e SPLUNK_START_ARGS='--accept-license' \
+      -e SPLUNK_PASSWORD="$PASSWORD" \
+      "$IMAGE" >/dev/null || die "docker run failed"
+  fi
+  wait_ready
+  ensure_hec
+  cmd_status
+}
+
+cmd_down() {
+  need_docker
+  docker inspect "$CONTAINER" >/dev/null 2>&1 || { info "no container '$CONTAINER'"; return 0; }
+  info "stopping + removing container (data volume '$VOLUME' kept)"
+  docker rm -f "$CONTAINER" >/dev/null
+  info "down. data preserved -> 'splunk_test up' restores it. 'splunk_test reset' wipes it."
+}
+
+cmd_restart() { cmd_down; cmd_up; }
+
+cmd_reset() {
+  need_docker
+  info "removing container '$CONTAINER' and data volume '$VOLUME'"
+  docker rm -f "$CONTAINER" >/dev/null 2>&1
+  docker volume rm "$VOLUME" >/dev/null 2>&1
+  info "wiped clean"
+}
+
+cmd_status() {
+  need_docker
+  if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    echo "container : (not created)"
+    echo "run 'splunk_test up' to start"
+    return 0
+  fi
+  local running health web mgmt
+  running=$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)
+  health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "$CONTAINER" 2>/dev/null)
+  web=$(curl -s -o /dev/null -w '%{http_code}' "$WEB" 2>/dev/null)
+  mgmt=$(curl -sk -o /dev/null -w '%{http_code}' -u "admin:${PASSWORD}" "${MGMT}/services/server/info" 2>/dev/null)
+  echo "container : $CONTAINER (running=$running health=$health)"
+  echo "web ui    : $WEB        [HTTP $web]  (admin / $PASSWORD)"
+  echo "search    : ${WEB}/en-US/app/search/search"
+  echo "mgmt rest : $MGMT       [HTTP $mgmt]"
+  echo "hec       : $HEC"
+  if [[ "$mgmt" == "200" ]]; then
+    echo "hec token : $(hec_token)"
+  fi
+}
+
+cmd_hec_token() { need_docker; is_running || die "not running"; hec_token; }
+
+cmd_ui() {
+  command -v open >/dev/null 2>&1 && open "$WEB" || echo "$WEB"
+}
+
+cmd_logs() { need_docker; docker logs "${1:-}" "$CONTAINER"; }
+
+# splunk_test send <index> '<json-event-or-payload>'
+# Bare JSON object -> wrapped as the event. Full HEC payload (has "event"
+# key) -> sent as-is.
+cmd_send() {
+  need_docker; is_running || die "not running"
+  local idx="${1:?usage: splunk_test send <index> '<json>'}"
+  local payload="${2:?usage: splunk_test send <index> '<json>'}"
+  ensure_hec; allow_index "$idx"
+  local tok body
+  tok=$(hec_token); [[ -n "$tok" ]] || die "could not resolve HEC token"
+  if echo "$payload" | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(0 if "event" in d else 1)' 2>/dev/null; then
+    body="$payload"
+  else
+    body=$(python3 -c 'import sys,json;e=json.loads(sys.argv[2]);print(json.dumps({"index":sys.argv[1],"sourcetype":"manual","event":e}))' "$idx" "$payload")
+  fi
+  curl -sk "${HEC}/services/collector/event" -H "Authorization: Splunk ${tok}" -d "$body"; echo
+}
+
+# splunk_test search '<spl>'   (oneshot, prints raw events)
+cmd_search() {
+  need_docker; is_running || die "not running"
+  local spl="${1:?usage: splunk_test search '<spl>'}"
+  [[ "$spl" == search* || "$spl" == \|* ]] || spl="search $spl"
+  curl_mgmt "${MGMT}/services/search/jobs" \
+    --data-urlencode "search=${spl}" -d output_mode=json -d exec_mode=oneshot \
+    | python3 -c '
+import sys,json
+r=json.load(sys.stdin).get("results",[])
+print(f"# {len(r)} event(s)")
+for e in r:
+    print(json.dumps({k:v for k,v in e.items() if not k.startswith("_") or k=="_time"}))'
+}
+
+# ---- dispatch -------------------------------------------------------------
+case "${1:-}" in
+  up)         shift; cmd_up "$@" ;;
+  down|stop)  shift; cmd_down "$@" ;;
+  restart)    shift; cmd_restart "$@" ;;
+  reset|nuke) shift; cmd_reset "$@" ;;
+  status|st)  shift; cmd_status "$@" ;;
+  send)       shift; cmd_send "$@" ;;
+  search)     shift; cmd_search "$@" ;;
+  hec-token)  shift; cmd_hec_token "$@" ;;
+  ui|open)    shift; cmd_ui "$@" ;;
+  logs)       shift; cmd_logs "$@" ;;
+  ""|-h|--help|help)
+    awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} {exit}' "$0" ;;
+  *) die "unknown command '$1' (try: splunk_test help)" ;;
+esac
