@@ -145,6 +145,7 @@ cmd_status() {
   mgmt=$(curl -sk -o /dev/null -w '%{http_code}' -u "admin:${PASSWORD}" "${MGMT}/services/server/info" 2>/dev/null)
   echo "container : $CONTAINER (running=$running health=$health)"
   echo "web ui    : $WEB        [HTTP $web]  (admin / $PASSWORD)"
+  echo "search    : ${WEB}/en-US/app/search/search"
   echo "mgmt rest : $MGMT       [HTTP $mgmt]"
   echo "hec       : $HEC"
   if [[ "$mgmt" == "200" ]]; then
