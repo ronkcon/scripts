@@ -3,5 +3,6 @@
 #DOC# Flink;getJobId;Get the Job ID of the first job running on the local job manager
 #DOC# Flink;getJobsState;Get the state of all the jobs running on the local job manager
 #DOC# Flink;stopJobWithDrain;Stop the first job running on the local job manager - with the `--drain` flag
+#DOC# Splunk;splunk_test;Launch/control a throwaway local Splunk for tests (up|down|status|send|search|reset)
 
 
