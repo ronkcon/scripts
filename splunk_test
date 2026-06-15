@@ -3,8 +3,12 @@
 #
 # Launch / control a throwaway local Splunk Enterprise for quick tests.
 # Runs the official splunk/splunk image under linux/amd64 (works on Apple
-# Silicon via emulation). Dev license, 500MB/day. State lives in a named
-# Docker volume so events survive `down`/`up`; `reset` wipes everything.
+# Silicon via emulation). No-cost Trial license (500MB/day, full features
+# incl. auth; ~30-day window we never hit on a disposable box). State lives
+# in a named Docker volume so events survive `down`/`up`; `reset` wipes all.
+#
+# Licensing + the Free-license caveat (Free disables auth -> breaks REST):
+# see LICENSE-NOTES.md. Opt into Free with `SPLUNK_TEST_LICENSE=Free`.
 #
 # Examples:
 #   splunk_test up                 # start (first run provisions ~2min)
@@ -21,6 +25,10 @@ CONTAINER="${SPLUNK_TEST_CONTAINER:-splunk-test}"
 VOLUME="${SPLUNK_TEST_VOLUME:-splunk-test-data}"
 IMAGE="${SPLUNK_TEST_IMAGE:-splunk/splunk:latest}"
 PASSWORD="${SPLUNK_TEST_PASSWORD:-Changeme123!}"
+# License: default Trial (no-cost, full features incl. auth). Set to "Free" for
+# the never-expiring Free license -- but Free disables auth and the REST-driven
+# commands (send/search/hec-token) will 401. See LICENSE-NOTES.md.
+LICENSE="${SPLUNK_TEST_LICENSE:-}"
 WEB_PORT="${SPLUNK_TEST_WEB_PORT:-8000}"
 HEC_PORT="${SPLUNK_TEST_HEC_PORT:-8088}"
 MGMT_PORT="${SPLUNK_TEST_MGMT_PORT:-8089}"
@@ -100,12 +108,18 @@ cmd_up() {
     docker start "$CONTAINER" >/dev/null
   else
     info "creating container '$CONTAINER' (image $IMAGE, amd64)"
+    local lic_args=()
+    if [[ -n "$LICENSE" ]]; then
+      info "license: $LICENSE (warning: 'Free' disables auth -> REST commands will 401; see LICENSE-NOTES.md)"
+      lic_args=(-e SPLUNK_LICENSE_URI="$LICENSE")
+    fi
     docker run -d --name "$CONTAINER" --platform linux/amd64 \
       -p "${WEB_PORT}:8000" -p "${HEC_PORT}:8088" -p "${MGMT_PORT}:8089" \
       -v "${VOLUME}:/opt/splunk/var" \
       -e SPLUNK_GENERAL_TERMS='--accept-sgt-current-at-splunk-com' \
       -e SPLUNK_START_ARGS='--accept-license' \
       -e SPLUNK_PASSWORD="$PASSWORD" \
+      "${lic_args[@]+"${lic_args[@]}"}" \
       "$IMAGE" >/dev/null || die "docker run failed"
   fi
   wait_ready
