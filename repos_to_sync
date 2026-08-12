@@ -6,6 +6,7 @@ ${HOME}/code/work/beacon-security/platform
 ${HOME}/code/work/beacon-security/terraform-modules
 ${HOME}/code/work/beacon-security/terraform-live
 ${HOME}/code/work/beacon-security/gitops-deployments
+${HOME}/code/work/beacon-security/beacon-onboarding
 ${HOME}/code/work/beacon-security/context
 ${HOME}/code/work/beacon-security/beacon-docs-site
 ${HOME}/code/work/beacon-security/dev-kb
